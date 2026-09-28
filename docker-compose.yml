@@ -50,7 +50,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-    networks: [internal]
+    networks:
+      internal:
+      reverse-proxy:
+        aliases:
+          - reklamacjeos-backend
 
   whatsapp:
     build:
@@ -103,3 +107,6 @@ volumes:
 networks:
   internal:
     driver: bridge
+  reverse-proxy:
+    external: true
+    name: multiplekser-shared
