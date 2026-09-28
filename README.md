@@ -101,7 +101,7 @@ Po `docker compose up -d --force-recreate caddy` Caddy automatycznie pobierze ce
 
 ### Kontrolowana wysyłka SMTP
 
-Automatyczna wysyłka pozostaje wyłączona przy `SMTP_ENABLED=false`. Po uzyskaniu danych skrzynki ustaw w `.env` host, port, login i adres nadawcy. Hasło przechowuj wyłącznie w ignorowanym przez Git pliku `.secrets/smtp_password` z prawami `600`; worker montuje go tylko do odczytu. Dla portu 587 użyj `SMTP_STARTTLS=true` oraz `SMTP_SSL=false`; dla portu 465 ustaw odwrotnie. Włącz wysyłkę przez `SMTP_ENABLED=true` dopiero po zapisaniu hasła.
+Automatyczna wysyłka pozostaje wyłączona przy `SMTP_ENABLED=false`. Po uzyskaniu danych skrzynki ustaw w `.env` host, port, login i adres nadawcy. Hasło przechowuj wyłącznie w ignorowanym przez Git pliku `.secrets/smtp_password`; skrypt `ops/set-smtp-password.sh` nadaje mu prawa `640`, zapisuje jego grupę w `SMTP_SECRET_GID` i udostępnia odczyt wyłącznie workerowi. Dla portu 587 użyj `SMTP_STARTTLS=true` oraz `SMTP_SSL=false`; dla portu 465 ustaw odwrotnie. Włącz wysyłkę przez `SMTP_ENABLED=true` dopiero po zapisaniu hasła.
 
 Backend zapisuje zatwierdzoną wiadomość i listę załączników w trwałej kolejce. Osobna usługa `email-worker` wysyła dokładnie tę kopię. Reklamacja otrzymuje status „Wysłana” dopiero po przyjęciu wiadomości przez serwer SMTP. Błąd jednoznaczny można ponowić ręcznie; po zerwaniu połączenia z niejednoznacznym wynikiem system wymaga sprawdzenia skrzynki „Wysłane”, aby nie utworzyć duplikatu.
 

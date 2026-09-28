@@ -19,7 +19,7 @@ umask 077
 secret_tmp=$(mktemp .secrets/smtp_password.XXXXXX)
 trap 'rm -f "$secret_tmp"' EXIT
 printf '%s' "$smtp_secret" > "$secret_tmp"
-chmod 600 "$secret_tmp"
+chmod 640 "$secret_tmp"
 mv "$secret_tmp" .secrets/smtp_password
 trap - EXIT
 unset smtp_secret
@@ -28,6 +28,12 @@ if grep -q '^SMTP_ENABLED=' .env; then
   sed -i 's/^SMTP_ENABLED=.*/SMTP_ENABLED=true/' .env
 else
   printf '\nSMTP_ENABLED=true\n' >> .env
+fi
+smtp_secret_gid=$(id -g)
+if grep -q '^SMTP_SECRET_GID=' .env; then
+  sed -i "s/^SMTP_SECRET_GID=.*/SMTP_SECRET_GID=$smtp_secret_gid/" .env
+else
+  printf 'SMTP_SECRET_GID=%s\n' "$smtp_secret_gid" >> .env
 fi
 chmod 600 .env
 

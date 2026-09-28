@@ -73,6 +73,8 @@ services:
   email-worker:
     image: reklamacjeos-backend
     restart: unless-stopped
+    group_add:
+      - "${SMTP_SECRET_GID:-1001}"
     command: ["python", "-m", "app.email_worker"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
