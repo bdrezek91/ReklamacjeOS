@@ -116,7 +116,7 @@ def list_whatsapp_messages(db: Session = Depends(get_db)) -> list[dict[str, obje
                     "filename": attachment.original_filename,
                     "mime_type": attachment.mime_type,
                     "size_bytes": attachment.size_bytes,
-                    "url": f"/media/{attachment.id}",
+                    "url": f"{settings.root_path}/media/{attachment.id}",
                 }
                 for attachment in message.attachments
             ],

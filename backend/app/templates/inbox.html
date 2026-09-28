@@ -17,8 +17,8 @@
           {% if message.attachments %}
             <div class="gallery">
               {% for attachment in message.attachments %}
-                <a href="/media/{{ attachment.id }}" target="_blank" rel="noopener">
-                  <img src="/media/{{ attachment.id }}" alt="{{ attachment.original_filename }}" loading="lazy">
+                <a href="{{ root_path }}/media/{{ attachment.id }}" target="_blank" rel="noopener">
+                  <img src="{{ root_path }}/media/{{ attachment.id }}" alt="{{ attachment.original_filename }}" loading="lazy">
                   <span>{{ attachment.original_filename }}</span>
                 </a>
               {% endfor %}
@@ -32,4 +32,3 @@
     <section class="empty-state"><h2>Brak wiadomości</h2><p>Po sparowaniu WhatsApp i ustawieniu ID grupy nowe wpisy pojawią się tutaj.</p></section>
   {% endif %}
 {% endblock %}
-

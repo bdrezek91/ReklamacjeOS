@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from .api import router as api_router
 from .db import get_db
 from .models import Attachment, Complaint, ComplaintStatus, WhatsAppMessage
+from .config import settings
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -17,6 +18,7 @@ app = FastAPI(title="ReklamacjeOS", version="0.1.0", docs_url=None, redoc_url=No
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+templates.env.globals["root_path"] = settings.root_path
 
 
 @app.get("/health")
