@@ -10,6 +10,16 @@ def env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def read_secret(name: str, file_name: str) -> str:
+    path = os.getenv(file_name, "").strip()
+    if path:
+        try:
+            return Path(path).read_text().strip()
+        except OSError:
+            return ""
+    return os.getenv(name, "")
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.getenv(
@@ -24,9 +34,10 @@ class Settings:
     data_root: Path = Path(os.getenv("DATA_ROOT", "/data/reklamacje"))
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(15 * 1024 * 1024)))
     smtp_host: str = os.getenv("SMTP_HOST", "").strip()
+    smtp_enabled: bool = env_bool("SMTP_ENABLED", False)
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
     smtp_username: str = os.getenv("SMTP_USERNAME", "").strip()
-    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+    smtp_password: str = read_secret("SMTP_PASSWORD", "SMTP_PASSWORD_FILE")
     smtp_from_address: str = os.getenv("SMTP_FROM_ADDRESS", "").strip()
     smtp_from_name: str = os.getenv("SMTP_FROM_NAME", "Reklamacje DAMPOL").strip()
     smtp_starttls: bool = env_bool("SMTP_STARTTLS", True)
@@ -36,7 +47,8 @@ class Settings:
 
     @property
     def smtp_configured(self) -> bool:
-        return bool(self.smtp_host and self.smtp_from_address)
+        has_credentials = not self.smtp_username or bool(self.smtp_password)
+        return bool(self.smtp_enabled and self.smtp_host and self.smtp_from_address and has_credentials)
 
 
 settings = Settings()

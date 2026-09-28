@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+.secrets/
 
 __pycache__/
 *.py[cod]
@@ -20,4 +21,3 @@ data/
 .DS_Store
 .idea/
 .vscode/
-

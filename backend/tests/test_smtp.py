@@ -12,6 +12,7 @@ from .test_ingest import make_client
 def test_queues_immutable_smtp_snapshot(tmp_path):
     client, session = make_client(tmp_path)
     object.__setattr__(settings, "smtp_host", "smtp.example.test")
+    object.__setattr__(settings, "smtp_enabled", True)
     object.__setattr__(settings, "smtp_from_address", "reklamacje@example.test")
 
     complaint = Complaint(
@@ -59,6 +60,7 @@ def test_worker_builds_tls_message_without_exposing_credentials(tmp_path, monkey
     attachment_path.write_bytes(attachment_content)
     object.__setattr__(settings, "data_root", tmp_path)
     object.__setattr__(settings, "smtp_host", "smtp.example.test")
+    object.__setattr__(settings, "smtp_enabled", True)
     object.__setattr__(settings, "smtp_port", 587)
     object.__setattr__(settings, "smtp_username", "smtp-user")
     object.__setattr__(settings, "smtp_password", "smtp-secret")

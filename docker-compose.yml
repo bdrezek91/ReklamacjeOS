@@ -47,6 +47,7 @@ services:
       DATA_ROOT: /data/reklamacje
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
       SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       TZ: ${TZ:-Europe/Warsaw}
     volumes:
@@ -77,9 +78,10 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       DATA_ROOT: /data/reklamacje
       SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_PASSWORD_FILE: /run/secrets/smtp_password
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Reklamacje DAMPOL}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
@@ -89,6 +91,7 @@ services:
       TZ: ${TZ:-Europe/Warsaw}
     volumes:
       - complaint_data:/data/reklamacje:ro
+      - ./.secrets/smtp_password:/run/secrets/smtp_password:ro
     depends_on:
       backend:
         condition: service_healthy
