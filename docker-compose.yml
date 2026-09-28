@@ -94,6 +94,36 @@ services:
     logging: *default-logging
     networks: [internal]
 
+  backup:
+    build:
+      context: ./ops/backup
+    restart: unless-stopped
+    user: "${BACKUP_UID:-1001}:${BACKUP_GID:-1001}"
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGDATABASE: ${POSTGRES_DB}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_ROOT: /backups
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS:-108000}
+      FREE_SPACE_WARN_KB: ${BACKUP_FREE_SPACE_WARN_KB:-10485760}
+      TZ: ${TZ:-Europe/Warsaw}
+    volumes:
+      - complaint_data:/data/reklamacje:ro
+      - ${BACKUP_HOST_PATH:-/var/backups/reklamacjeos}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/check-health.sh"]
+      interval: 5m
+      timeout: 10s
+      retries: 2
+      start_period: 5m
+    logging: *default-logging
+    networks: [internal]
+
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped
