@@ -1,6 +1,6 @@
 # ReklamacjeOS
 
-Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 4**: przyjęcie reklamacji z WhatsApp, ręczna akceptacja oraz przygotowanie kompletnej korespondencji do dostawcy.
+Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 5**: przyjęcie reklamacji z WhatsApp, ręczna akceptacja, przygotowanie korespondencji oraz kontrolowana wysyłka SMTP.
 
 > `whatsapp-web.js` nie jest oficjalnym API Meta. Zmiany po stronie WhatsApp mogą wymagać aktualizacji bridge'a, a używanie nieoficjalnego klienta wiąże się z ryzykiem wylogowania lub ograniczenia konta.
 
@@ -23,6 +23,9 @@ Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap
 - kartoteka dostawców z adresem reklamacyjnym; Paneltech korzysta z `reklamacje@paneltech.pl`,
 - przypisanie dostawcy, edytowalny szkic wiadomości i wybrane fotografie,
 - pobranie wiadomości `.eml` ze zdjęciami do ręcznej wysyłki,
+- trwała kolejka SMTP i osobny worker z blokadą podwójnego zlecenia,
+- status „Wysłana” dopiero po przyjęciu wiadomości przez serwer SMTP,
+- bezpieczne zatrzymanie przy niejednoznacznym wyniku połączenia i ręczne ponowienie jednoznacznych błędów,
 - statusy „Gotowa do wysłania”, „Wysłana” i „Zamknięta” oraz wyszukiwanie,
 - Caddy z obowiązkowym HTTP Basic Auth,
 - migracje Alembic i schemat przygotowany pod reklamacje, audyt, dane AI oraz przyszłe maile.
@@ -96,6 +99,12 @@ SITE_ADDRESS=reklamacje.twojadomena.pl
 
 Po `docker compose up -d --force-recreate caddy` Caddy automatycznie pobierze certyfikat.
 
+### Kontrolowana wysyłka SMTP
+
+Automatyczna wysyłka pozostaje wyłączona, dopóki `SMTP_HOST` i `SMTP_FROM_ADDRESS` są puste. Po uzyskaniu danych skrzynki ustaw w `.env` host, port, login, hasło aplikacji i adres nadawcy. Dla portu 587 użyj `SMTP_STARTTLS=true` oraz `SMTP_SSL=false`; dla portu 465 ustaw odwrotnie.
+
+Backend zapisuje zatwierdzoną wiadomość i listę załączników w trwałej kolejce. Osobna usługa `email-worker` wysyła dokładnie tę kopię. Reklamacja otrzymuje status „Wysłana” dopiero po przyjęciu wiadomości przez serwer SMTP. Błąd jednoznaczny można ponowić ręcznie; po zerwaniu połączenia z niejednoznacznym wynikiem system wymaga sprawdzenia skrzynki „Wysłane”, aby nie utworzyć duplikatu.
+
 ## Dane i kopie zapasowe
 
 - PostgreSQL: wolumen `postgres_data`.
@@ -155,6 +164,6 @@ Testy backendu obejmują odrzucenie obcej grupy, idempotencję wiadomości i zap
 
 - **Etap 2:** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
 - **Etap 3:** pełna karta reklamacji, galeria, historia zmian, numeracja `R/nn/MM/YYYY` i powiadomienie WhatsApp po akceptacji.
-- **Etap 4 (aktualny):** kartoteka dostawców, edytowalny szkic, plik `.eml`, ręczne potwierdzenie wysyłki i zamknięcie.
-- **Etap 5:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.
-- **Etap 6:** kontrolowana wysyłka SMTP przyciskiem „AKCEPTUJ I WYŚLIJ”. Bez IMAP.
+- **Etap 4:** kartoteka dostawców, edytowalny szkic, plik `.eml`, ręczne potwierdzenie wysyłki i zamknięcie.
+- **Etap 5 (aktualny):** kontrolowana wysyłka SMTP przyciskiem „AKCEPTUJ I WYŚLIJ”, kolejka i audyt. Bez IMAP.
+- **Etap 6:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.

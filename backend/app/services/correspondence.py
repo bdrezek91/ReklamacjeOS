@@ -1,4 +1,5 @@
 from datetime import datetime
+from email.utils import make_msgid
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from ..models import (
     ComplaintEvent,
     ComplaintStatus,
     EmailDraft,
+    EmailOutbox,
     EmailSent,
     Supplier,
     WhatsAppMessage,
@@ -73,6 +75,8 @@ def assign_supplier(db: Session, complaint_id: int, supplier_id: int, *, actor: 
     supplier = db.get(Supplier, supplier_id)
     if supplier is None or not supplier.active:
         raise DraftOperationError("Wybierz aktywnego dostawcę")
+    if db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id)) is not None:
+        raise DraftOperationError("Nie można zmienić dostawcy po zleceniu wysyłki")
 
     previous_id = complaint.supplier_id
     complaint.supplier_id = supplier.id
@@ -167,6 +171,8 @@ def update_email_draft(
     draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
     if draft is None:
         raise DraftOperationError("Szkic wiadomości nie istnieje")
+    if db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id)) is not None:
+        raise DraftOperationError("Nie można zmienić szkicu po zleceniu wysyłki")
     clean_subject = subject.strip()
     clean_body = body.strip()
     if not clean_subject or not clean_body:
@@ -201,6 +207,79 @@ def selected_attachments(db: Session, complaint_id: int) -> list[Attachment]:
     )
 
 
+def enqueue_smtp_email(
+    db: Session,
+    complaint_id: int,
+    *,
+    sender: str,
+    actor: str,
+) -> EmailOutbox:
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None or complaint.status != ComplaintStatus.READY_TO_SEND:
+        raise DraftOperationError("Reklamacja nie jest gotowa do wysłania")
+    draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
+    if draft is None:
+        raise DraftOperationError("Szkic wiadomości nie istnieje")
+    if db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id)) is not None:
+        raise DraftOperationError("Wysyłka tej reklamacji została już zlecona")
+
+    clean_sender = validate_email(sender)
+    attachments = selected_attachments(db, complaint.id)
+    sender_domain = clean_sender.rsplit("@", 1)[-1]
+    item = EmailOutbox(
+        complaint_id=complaint.id,
+        recipient=draft.recipient,
+        sender=clean_sender,
+        subject=draft.subject,
+        body=draft.body,
+        attachments=[
+            {
+                "id": attachment.id,
+                "filename": attachment.original_filename,
+                "storage_path": attachment.storage_path,
+                "mime_type": attachment.mime_type,
+                "sha256": attachment.sha256,
+                "size_bytes": attachment.size_bytes,
+            }
+            for attachment in attachments
+        ],
+        message_id=make_msgid(idstring=f"reklamacjeos-{complaint.id}", domain=sender_domain),
+        status="pending",
+    )
+    db.add(item)
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint.id,
+            event_type="smtp_send_queued",
+            actor=actor,
+            details={"attachment_count": len(attachments)},
+        )
+    )
+    db.flush()
+    return item
+
+
+def retry_smtp_email(db: Session, complaint_id: int, *, actor: str) -> EmailOutbox:
+    item = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint_id))
+    if item is None:
+        raise DraftOperationError("Brak zleconej wysyłki SMTP")
+    if item.status != "failed":
+        raise DraftOperationError("Ponowić można tylko jednoznacznie nieudaną wysyłkę")
+
+    item.status = "pending"
+    item.last_error = None
+    item.claimed_at = None
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint_id,
+            event_type="smtp_send_retry_requested",
+            actor=actor,
+            details={"outbox_id": item.id},
+        )
+    )
+    return item
+
+
 def mark_manually_sent(db: Session, complaint_id: int, *, actor: str) -> EmailSent:
     complaint = db.get(Complaint, complaint_id)
     if complaint is None or complaint.status != ComplaintStatus.READY_TO_SEND:
@@ -208,6 +287,9 @@ def mark_manually_sent(db: Session, complaint_id: int, *, actor: str) -> EmailSe
     draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
     if draft is None:
         raise DraftOperationError("Szkic wiadomości nie istnieje")
+    outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id))
+    if outbox is not None and outbox.status in {"pending", "processing", "sent"}:
+        raise DraftOperationError("Trwa lub zakończyła się automatyczna wysyłka SMTP")
 
     attachments = selected_attachments(db, complaint.id)
     sent = EmailSent(

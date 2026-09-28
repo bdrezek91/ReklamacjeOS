@@ -12,6 +12,7 @@ from ..models import (
     ComplaintField,
     ComplaintMonthlyNumberCounter,
     ComplaintStatus,
+    EmailOutbox,
     WhatsAppMessage,
     WhatsAppOutbox,
 )
@@ -54,6 +55,10 @@ def update_complaint_card(
     actor: str,
 ) -> Complaint:
     complaint = _editable_complaint(db, complaint_id)
+    if complaint.status == ComplaintStatus.READY_TO_SEND and db.scalar(
+        select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id)
+    ) is not None:
+        raise DraftOperationError("Nie można zmienić karty po zleceniu wysyłki")
     current = dict(complaint.approved_data or {})
     changed_fields: list[str] = []
 

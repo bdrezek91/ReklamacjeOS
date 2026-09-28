@@ -18,6 +18,7 @@ from .models import (
     Complaint,
     ComplaintStatus,
     EmailDraft,
+    EmailOutbox,
     Supplier,
     WhatsAppMessage,
     WhatsAppOutbox,
@@ -30,8 +31,10 @@ from .services.complaints import (
 )
 from .services.correspondence import (
     assign_supplier,
+    enqueue_smtp_email,
     mark_manually_sent,
     prepare_email_draft,
+    retry_smtp_email,
     save_supplier,
     selected_attachments,
     update_email_draft,
@@ -180,6 +183,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     attachments = [attachment for message in messages for attachment in message.attachments]
     outbox = db.scalar(select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id))
     email_draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
+    email_outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id))
     suppliers = db.scalars(select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)).all()
     return templates.TemplateResponse(
         request=request,
@@ -219,6 +223,8 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "panel_action_token": settings.panel_action_token,
             "outbox": outbox,
             "email_draft": email_draft,
+            "email_outbox": email_outbox,
+            "smtp_configured": settings.smtp_configured,
             "suppliers": suppliers,
         },
     )
@@ -513,6 +519,52 @@ def mark_sent_action(
     verify_panel_action_token(action_token)
     try:
         mark_manually_sent(db, complaint_id, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/drafts/{complaint_id}/send-smtp")
+def send_smtp_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    if not settings.smtp_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Skrzynka SMTP nie jest skonfigurowana",
+        )
+    try:
+        enqueue_smtp_email(
+            db,
+            complaint_id,
+            sender=settings.smtp_from_address,
+            actor="panel",
+        )
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/drafts/{complaint_id}/retry-smtp")
+def retry_smtp_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        retry_smtp_email(db, complaint_id, actor="panel")
         db.commit()
     except DraftOperationError as error:
         db.rollback()

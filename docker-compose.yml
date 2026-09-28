@@ -46,6 +46,8 @@ services:
       GROUPING_WINDOW_MINUTES: ${GROUPING_WINDOW_MINUTES:-10}
       DATA_ROOT: /data/reklamacje
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
       TZ: ${TZ:-Europe/Warsaw}
     volumes:
       - complaint_data:/data/reklamacje
@@ -66,6 +68,38 @@ services:
       reverse-proxy:
         aliases:
           - reklamacjeos-backend
+
+  email-worker:
+    image: reklamacjeos-backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.email_worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      DATA_ROOT: /data/reklamacje
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Reklamacje DAMPOL}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_SSL: ${SMTP_SSL:-false}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-30}
+      EMAIL_WORKER_INTERVAL_SECONDS: ${EMAIL_WORKER_INTERVAL_SECONDS:-5}
+      TZ: ${TZ:-Europe/Warsaw}
+    volumes:
+      - complaint_data:/data/reklamacje:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/email-worker-ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    logging: *default-logging
+    networks: [internal]
 
   whatsapp:
     build:
