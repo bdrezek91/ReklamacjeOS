@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Nowe z WhatsApp · ReklamacjeOS{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><p class="eyebrow">Surowe dane źródłowe</p><h1>Nowe z WhatsApp</h1></div>
+    <span class="badge">{{ messages|length }} ostatnich</span>
+  </div>
+  {% if messages %}
+    <section class="timeline">
+      {% for message in messages %}
+        <article class="message-card">
+          <div class="message-meta">
+            <strong>{{ message.author_name or message.author_id or 'Nieznany autor' }}</strong>
+            <time datetime="{{ message.source_timestamp.isoformat() }}">{{ message.source_timestamp.strftime('%d.%m.%Y %H:%M:%S') }}</time>
+          </div>
+          {% if message.body %}<p class="message-body">{{ message.body }}</p>{% endif %}
+          {% if message.attachments %}
+            <div class="gallery">
+              {% for attachment in message.attachments %}
+                <a href="/media/{{ attachment.id }}" target="_blank" rel="noopener">
+                  <img src="/media/{{ attachment.id }}" alt="{{ attachment.original_filename }}" loading="lazy">
+                  <span>{{ attachment.original_filename }}</span>
+                </a>
+              {% endfor %}
+            </div>
+          {% endif %}
+          <div class="source-id">ID: {{ message.wa_message_id }} · typ: {{ message.message_type }}</div>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="empty-state"><h2>Brak wiadomości</h2><p>Po sparowaniu WhatsApp i ustawieniu ID grupy nowe wpisy pojawią się tutaj.</p></section>
+  {% endif %}
+{% endblock %}
+

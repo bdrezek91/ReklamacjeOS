@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · ReklamacjeOS{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><p class="eyebrow">Przegląd systemu</p><h1>Dashboard</h1></div>
+    <span class="badge success">System działa</span>
+  </div>
+  <section class="stats">
+    <article><span>Wiadomości WhatsApp</span><strong>{{ message_count }}</strong></article>
+    <article><span>Oryginalne zdjęcia</span><strong>{{ attachment_count }}</strong></article>
+    <article><span>Drafty</span><strong>{{ draft_count }}</strong></article>
+    <article><span>Do akceptacji</span><strong>{{ pending_count }}</strong></article>
+  </section>
+  <section class="panel">
+    <h2>Stan Etapu 1</h2>
+    <p>Bridge zapisuje wyłącznie wiadomości ze skonfigurowanej grupy. Dane źródłowe i oryginalne pliki pozostają niezmienione.</p>
+    <div class="checklist">
+      <span>✓ PostgreSQL</span><span>✓ Dysk plików</span><span>✓ Idempotencja</span><span>✓ Panel chroniony</span>
+    </div>
+  </section>
+{% endblock %}
+

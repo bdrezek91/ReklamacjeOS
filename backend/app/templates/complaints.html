@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · ReklamacjeOS{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Reklamacje</p><h1>{{ title }}</h1></div></div>
+  {% if complaints %}
+    <section class="panel">
+      {% for complaint in complaints %}<p><strong>{{ complaint.official_number or complaint.draft_number }}</strong></p>{% endfor %}
+    </section>
+  {% else %}
+    <section class="empty-state"><h2>Ta lista jest pusta</h2><p>Obsługa draftów zostanie dodana w Etapie 2.</p></section>
+  {% endif %}
+{% endblock %}
+

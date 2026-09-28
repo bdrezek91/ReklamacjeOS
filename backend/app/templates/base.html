@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ReklamacjeOS{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Reklamacje<span>OS</span></a>
+    <span class="environment">Etap 1 · fundament</span>
+  </header>
+  <div class="layout">
+    <nav class="sidebar" aria-label="Główna nawigacja">
+      <a class="{{ 'active' if active == 'dashboard' else '' }}" href="/">Dashboard</a>
+      <a class="{{ 'active' if active == 'inbox' else '' }}" href="/inbox">Nowe z WhatsApp</a>
+      <a class="{{ 'active' if active == 'pending' else '' }}" href="/complaints/pending">Do akceptacji</a>
+      <a class="{{ 'active' if active == 'sent' else '' }}" href="/complaints/sent">Wysłane</a>
+      <a class="{{ 'active' if active == 'closed' else '' }}" href="/complaints/closed">Zamknięte</a>
+    </nav>
+    <main class="content">{% block content %}{% endblock %}</main>
+  </div>
+</body>
+</html>
+
