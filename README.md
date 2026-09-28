@@ -1,6 +1,6 @@
 # ReklamacjeOS
 
-Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 3**: odczyt jednej grupy WhatsApp, deterministyczne grupowanie źródeł oraz pełna karta reklamacji z numerem nadawanym po ręcznej akceptacji.
+Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 4**: przyjęcie reklamacji z WhatsApp, ręczna akceptacja oraz przygotowanie kompletnej korespondencji do dostawcy.
 
 > `whatsapp-web.js` nie jest oficjalnym API Meta. Zmiany po stronie WhatsApp mogą wymagać aktualizacji bridge'a, a używanie nieoficjalnego klienta wiąże się z ryzykiem wylogowania lub ograniczenia konta.
 
@@ -20,6 +20,10 @@ Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap
 - miesięczna numeracja `R/nn/MM/YYYY` nadawana dopiero po ręcznej akceptacji,
 - edytowalna karta reklamacji, wybór zdjęć i przejście do statusu „Do akceptacji”,
 - wysyłka numeru na grupę WhatsApp z prośbą o oznaczenie reklamowanych płyt,
+- kartoteka dostawców z adresem reklamacyjnym; Paneltech korzysta z `reklamacje@paneltech.pl`,
+- przypisanie dostawcy, edytowalny szkic wiadomości i wybrane fotografie,
+- pobranie wiadomości `.eml` ze zdjęciami do ręcznej wysyłki,
+- statusy „Gotowa do wysłania”, „Wysłana” i „Zamknięta” oraz wyszukiwanie,
 - Caddy z obowiązkowym HTTP Basic Auth,
 - migracje Alembic i schemat przygotowany pod reklamacje, audyt, dane AI oraz przyszłe maile.
 
@@ -150,6 +154,7 @@ Testy backendu obejmują odrzucenie obcej grupy, idempotencję wiadomości i zap
 ## Zakres kolejnych etapów
 
 - **Etap 2:** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
-- **Etap 3 (aktualny):** pełna karta reklamacji, galeria, historia zmian, numeracja `R/nn/MM/YYYY` i powiadomienie WhatsApp po akceptacji.
-- **Etap 4:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.
-- **Etap 5:** edytowalny mail, ręczne „AKCEPTUJ I WYŚLIJ” oraz wysyłka SMTP. Bez IMAP.
+- **Etap 3:** pełna karta reklamacji, galeria, historia zmian, numeracja `R/nn/MM/YYYY` i powiadomienie WhatsApp po akceptacji.
+- **Etap 4 (aktualny):** kartoteka dostawców, edytowalny szkic, plik `.eml`, ręczne potwierdzenie wysyłki i zamknięcie.
+- **Etap 5:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.
+- **Etap 6:** kontrolowana wysyłka SMTP przyciskiem „AKCEPTUJ I WYŚLIJ”. Bez IMAP.

@@ -11,12 +11,13 @@
     <article><span>Drafty</span><strong>{{ draft_count }}</strong></article>
     <article><span>Do akceptacji</span><strong>{{ pending_count }}</strong></article>
     <article><span>Zaakceptowane</span><strong>{{ accepted_count }}</strong></article>
+    <article><span>Gotowe do wysłania</span><strong>{{ ready_count }}</strong></article>
   </section>
   <section class="panel">
-    <h2>Stan Etapu 3</h2>
-    <p>Po akceptacji system nadaje krótki numer reklamacji i przekazuje go na grupę WhatsApp jako oznaczenie reklamowanych płyt.</p>
+    <h2>Stan Etapu 4</h2>
+    <p>Po akceptacji system przygotowuje kontrolowany szkic reklamacji dla przypisanego dostawcy wraz z wybranymi zdjęciami.</p>
     <div class="checklist">
-      <span>✓ PostgreSQL</span><span>✓ Oryginalne pliki</span><span>✓ Grupowanie</span><span>✓ Numer po akceptacji</span>
+      <span>✓ Numer po akceptacji</span><span>✓ Kartoteka dostawców</span><span>✓ Szkic e-mail</span><span>✓ Załączniki</span>
     </div>
   </section>
 {% endblock %}

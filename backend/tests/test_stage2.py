@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from email import policy
+from email.parser import BytesParser
 
 from sqlalchemy import select
 
@@ -8,6 +10,9 @@ from app.models import (
     ComplaintEvent,
     ComplaintField,
     ComplaintStatus,
+    EmailDraft,
+    EmailSent,
+    Supplier,
     WhatsAppMessage,
     WhatsAppOutbox,
 )
@@ -148,7 +153,6 @@ def test_updates_card_gallery_and_status_with_audit(tmp_path):
         f"/drafts/{complaint_id}/card",
         data={
             "action_token": "panel-test-token",
-            "supplier": "Dostawca A",
             "material_product": "Płyta X",
             "quantity": "4 szt.",
             "defect_description": "Uszkodzone zamki",
@@ -178,10 +182,10 @@ def test_updates_card_gallery_and_status_with_audit(tmp_path):
     session.expire_all()
     complaint = session.get(Complaint, complaint_id)
     assert complaint.official_number == "R/01/09/2026"
-    assert complaint.approved_data["supplier"] == "Dostawca A"
+    assert complaint.approved_data["material_product"] == "Płyta X"
     assert complaint.status == ComplaintStatus.ACCEPTED
     assert session.get(Attachment, attachment.id).include_in_email is True
-    assert len(session.scalars(select(ComplaintField)).all()) == 7
+    assert len(session.scalars(select(ComplaintField)).all()) == 6
     event_types = set(session.scalars(select(ComplaintEvent.event_type)).all())
     assert {"complaint_accepted", "complaint_card_updated", "status_changed"} <= event_types
 
@@ -229,3 +233,77 @@ def test_updates_card_gallery_and_status_with_audit(tmp_path):
         "/api/internal/whatsapp/outbox/claim",
         headers={"Authorization": "Bearer test-token"},
     ).status_code == 204
+
+    supplier_save = client.post(
+        "/suppliers/save",
+        data={
+            "action_token": "panel-test-token",
+            "name": "Paneltech",
+            "email": "reklamacje@paneltech.pl",
+            "active": "true",
+        },
+        follow_redirects=False,
+    )
+    assert supplier_save.status_code == 303
+    supplier = session.scalar(select(Supplier).where(Supplier.name == "Paneltech"))
+
+    assignment = client.post(
+        f"/drafts/{complaint_id}/supplier",
+        data={"action_token": "panel-test-token", "supplier_id": supplier.id},
+        follow_redirects=False,
+    )
+    assert assignment.status_code == 303
+    prepare = client.post(
+        f"/drafts/{complaint_id}/prepare-email",
+        data={"action_token": "panel-test-token"},
+        follow_redirects=False,
+    )
+    assert prepare.status_code == 303
+
+    session.expire_all()
+    complaint = session.get(Complaint, complaint_id)
+    draft = session.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint_id))
+    assert complaint.status == ComplaintStatus.READY_TO_SEND
+    assert draft.recipient == "reklamacje@paneltech.pl"
+    assert "R/01/09/2026" in draft.subject
+    assert "Uszkodzone zamki" in draft.body
+
+    update_draft = client.post(
+        f"/drafts/{complaint_id}/email-draft",
+        data={
+            "action_token": "panel-test-token",
+            "recipient": "reklamacje@paneltech.pl",
+            "subject": "Testowy temat reklamacji",
+            "body": "Testowa treść reklamacji",
+        },
+        follow_redirects=False,
+    )
+    assert update_draft.status_code == 303
+
+    eml = client.get(f"/drafts/{complaint_id}/email.eml")
+    assert eml.status_code == 200
+    message = BytesParser(policy=policy.default).parsebytes(eml.content)
+    assert message["To"] == "reklamacje@paneltech.pl"
+    assert message["Subject"] == "Testowy temat reklamacji"
+    assert message["X-Unsent"] == "1"
+    assert [part.get_filename() for part in message.iter_attachments()] == ["wada.jpg"]
+
+    marked_sent = client.post(
+        f"/drafts/{complaint_id}/mark-sent",
+        data={"action_token": "panel-test-token"},
+        follow_redirects=False,
+    )
+    assert marked_sent.status_code == 303
+    close = client.post(
+        f"/drafts/{complaint_id}/status",
+        data={"action_token": "panel-test-token", "target_status": "closed"},
+        follow_redirects=False,
+    )
+    assert close.status_code == 303
+    session.expire_all()
+    assert session.get(Complaint, complaint_id).status == ComplaintStatus.CLOSED
+    assert session.scalar(select(EmailSent)).smtp_result == {"mode": "manual"}
+
+    filtered = client.get(f"/complaints/closed?q=R/01&supplier_id={supplier.id}")
+    assert filtered.status_code == 200
+    assert "R/01/09/2026" in filtered.text

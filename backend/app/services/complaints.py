@@ -18,7 +18,6 @@ from ..models import (
 from .grouping import DraftOperationError
 
 CARD_FIELDS = (
-    "supplier",
     "material_product",
     "quantity",
     "defect_description",
@@ -36,7 +35,12 @@ def _editable_complaint(db: Session, complaint_id: int) -> Complaint:
         raise DraftOperationError("Reklamacja nie istnieje")
     if complaint.merged_into_id is not None:
         raise DraftOperationError("Scalona reklamacja nie może być edytowana")
-    if complaint.status not in {ComplaintStatus.DRAFT, ComplaintStatus.PENDING_APPROVAL}:
+    if complaint.status not in {
+        ComplaintStatus.DRAFT,
+        ComplaintStatus.PENDING_APPROVAL,
+        ComplaintStatus.ACCEPTED,
+        ComplaintStatus.READY_TO_SEND,
+    }:
         raise DraftOperationError("Reklamacja w tym statusie nie może być edytowana")
     return complaint
 
@@ -107,10 +111,13 @@ def change_complaint_status(
     *,
     actor: str,
 ) -> Complaint:
-    complaint = _editable_complaint(db, complaint_id)
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None or complaint.merged_into_id is not None:
+        raise DraftOperationError("Reklamacja nie istnieje")
     allowed = {
         ComplaintStatus.DRAFT: {ComplaintStatus.PENDING_APPROVAL},
         ComplaintStatus.PENDING_APPROVAL: {ComplaintStatus.DRAFT},
+        ComplaintStatus.SENT: {ComplaintStatus.CLOSED},
     }
     if target_status not in allowed.get(complaint.status, set()):
         raise DraftOperationError("Niedozwolona zmiana statusu")

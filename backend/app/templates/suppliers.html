@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Dostawcy · ReklamacjeOS{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Kartoteka</p><h1>Dostawcy</h1></div></div>
+
+  <section class="panel supplier-form">
+    <h2>Dodaj dostawcę</h2>
+    <form method="post" action="{{ root_path }}/suppliers/save">
+      <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+      <div class="form-grid">
+        <label>Nazwa<input name="name" required></label>
+        <label>E-mail reklamacyjny<input name="email" type="email" required></label>
+        <label>Osoba kontaktowa<input name="contact_person"></label>
+        <label>Telefon<input name="phone"></label>
+        <label class="wide">Uwagi<textarea name="notes" rows="3"></textarea></label>
+      </div>
+      <input type="hidden" name="active" value="true">
+      <button class="button" type="submit">Dodaj dostawcę</button>
+    </form>
+  </section>
+
+  <section class="supplier-list">
+    {% for supplier in suppliers %}
+      <article class="panel">
+        <form method="post" action="{{ root_path }}/suppliers/save">
+          <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+          <input type="hidden" name="supplier_id" value="{{ supplier.id }}">
+          <div class="section-heading">
+            <h2>{{ supplier.name }}</h2>
+            <label class="inline-check"><input type="checkbox" name="active" value="true" {% if supplier.active %}checked{% endif %}> Aktywny</label>
+          </div>
+          <div class="form-grid">
+            <label>Nazwa<input name="name" value="{{ supplier.name }}" required></label>
+            <label>E-mail reklamacyjny<input name="email" type="email" value="{{ supplier.email }}" required></label>
+            <label>Osoba kontaktowa<input name="contact_person" value="{{ supplier.contact_person or '' }}"></label>
+            <label>Telefon<input name="phone" value="{{ supplier.phone or '' }}"></label>
+            <label class="wide">Uwagi<textarea name="notes" rows="3">{{ supplier.notes or '' }}</textarea></label>
+          </div>
+          <button class="button secondary" type="submit">Zapisz zmiany</button>
+        </form>
+      </article>
+    {% else %}
+      <section class="empty-state"><h2>Brak dostawców</h2><p>Dodaj pierwszego dostawcę powyżej.</p></section>
+    {% endfor %}
+  </section>
+{% endblock %}

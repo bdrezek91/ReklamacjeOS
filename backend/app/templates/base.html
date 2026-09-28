@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ReklamacjeOS{% endblock %}</title>
   <link rel="stylesheet" href="{{ root_path }}/static/app.css">
+  <link rel="stylesheet" href="{{ root_path }}/static/stage4.css">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="{{ root_path }}/">Reklamacje<span>OS</span></a>
-    <span class="environment">Etap 3 · akceptacja</span>
+    <span class="environment">Etap 4 · obsługa dostawców</span>
   </header>
   <div class="layout">
     <nav class="sidebar" aria-label="Główna nawigacja">
@@ -18,8 +19,10 @@
       <a class="{{ 'active' if active == 'drafts' else '' }}" href="{{ root_path }}/complaints/drafts">Drafty</a>
       <a class="{{ 'active' if active == 'pending' else '' }}" href="{{ root_path }}/complaints/pending">Do akceptacji</a>
       <a class="{{ 'active' if active == 'accepted' else '' }}" href="{{ root_path }}/complaints/accepted">Zaakceptowane</a>
+      <a class="{{ 'active' if active == 'ready' else '' }}" href="{{ root_path }}/complaints/ready">Gotowe do wysłania</a>
       <a class="{{ 'active' if active == 'sent' else '' }}" href="{{ root_path }}/complaints/sent">Wysłane</a>
       <a class="{{ 'active' if active == 'closed' else '' }}" href="{{ root_path }}/complaints/closed">Zamknięte</a>
+      <a class="{{ 'active' if active == 'suppliers' else '' }}" href="{{ root_path }}/suppliers">Dostawcy</a>
     </nav>
     <main class="content">{% block content %}{% endblock %}</main>
   </div>

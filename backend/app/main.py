@@ -1,22 +1,40 @@
 import secrets
+from email.message import EmailMessage
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .api import router as api_router
 from .config import settings
 from .db import get_db
-from .models import Attachment, Complaint, ComplaintStatus, WhatsAppMessage, WhatsAppOutbox
+from .models import (
+    Attachment,
+    Complaint,
+    ComplaintStatus,
+    EmailDraft,
+    Supplier,
+    WhatsAppMessage,
+    WhatsAppOutbox,
+)
 from .services.complaints import (
     accept_complaint,
     change_complaint_status,
     retry_whatsapp_notification,
     update_complaint_card,
+)
+from .services.correspondence import (
+    assign_supplier,
+    mark_manually_sent,
+    prepare_email_draft,
+    save_supplier,
+    selected_attachments,
+    update_email_draft,
 )
 from .services.grouping import DraftOperationError, merge_drafts, split_draft
 
@@ -56,6 +74,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
             "draft_count": status_counts.get(ComplaintStatus.DRAFT, 0),
             "pending_count": status_counts.get(ComplaintStatus.PENDING_APPROVAL, 0),
             "accepted_count": status_counts.get(ComplaintStatus.ACCEPTED, 0),
+            "ready_count": status_counts.get(ComplaintStatus.READY_TO_SEND, 0),
             "sent_count": status_counts.get(ComplaintStatus.SENT, 0),
         },
     )
@@ -77,25 +96,57 @@ def inbox(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
 
 
 @app.get("/complaints/{status_name}", response_class=HTMLResponse)
-def complaints_by_status(status_name: str, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+def complaints_by_status(
+    status_name: str,
+    request: Request,
+    q: str = "",
+    supplier_id: int | None = None,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
     mappings = {
         "drafts": (ComplaintStatus.DRAFT, "Drafty"),
         "pending": (ComplaintStatus.PENDING_APPROVAL, "Do akceptacji"),
         "accepted": (ComplaintStatus.ACCEPTED, "Zaakceptowane"),
+        "ready": (ComplaintStatus.READY_TO_SEND, "Gotowe do wysłania"),
         "sent": (ComplaintStatus.SENT, "Wysłane"),
         "closed": (ComplaintStatus.CLOSED, "Zamknięte"),
     }
     status_value, title = mappings.get(status_name, (ComplaintStatus.DRAFT, "Drafty"))
-    complaints = db.scalars(
+    query = (
         select(Complaint)
-        .options(selectinload(Complaint.messages).selectinload(WhatsAppMessage.attachments))
+        .outerjoin(Supplier)
+        .options(
+            selectinload(Complaint.messages).selectinload(WhatsAppMessage.attachments),
+            selectinload(Complaint.supplier),
+        )
         .where(Complaint.status == status_value, Complaint.merged_into_id.is_(None))
         .order_by(Complaint.updated_at.desc(), Complaint.id.desc())
-    ).all()
+    )
+    clean_query = q.strip()
+    if clean_query:
+        pattern = f"%{clean_query}%"
+        query = query.where(
+            or_(
+                Complaint.official_number.ilike(pattern),
+                Complaint.draft_number.ilike(pattern),
+                Supplier.name.ilike(pattern),
+            )
+        )
+    if supplier_id is not None:
+        query = query.where(Complaint.supplier_id == supplier_id)
+    complaints = db.scalars(query).unique().all()
+    suppliers = db.scalars(select(Supplier).order_by(Supplier.name)).all()
     return templates.TemplateResponse(
         request=request,
         name="complaints.html",
-        context={"active": status_name, "title": title, "complaints": complaints},
+        context={
+            "active": status_name,
+            "title": title,
+            "complaints": complaints,
+            "suppliers": suppliers,
+            "query": clean_query,
+            "selected_supplier_id": supplier_id,
+        },
     )
 
 
@@ -107,6 +158,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             selectinload(Complaint.messages).selectinload(WhatsAppMessage.attachments),
             selectinload(Complaint.events),
             selectinload(Complaint.merged_into),
+            selectinload(Complaint.supplier),
         )
         .where(Complaint.id == complaint_id)
     )
@@ -127,6 +179,8 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     attachment_count = sum(len(message.attachments) for message in messages)
     attachments = [attachment for message in messages for attachment in message.attachments]
     outbox = db.scalar(select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id))
+    email_draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
+    suppliers = db.scalars(select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)).all()
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
@@ -135,6 +189,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
                 ComplaintStatus.DRAFT: "drafts",
                 ComplaintStatus.PENDING_APPROVAL: "pending",
                 ComplaintStatus.ACCEPTED: "accepted",
+                ComplaintStatus.READY_TO_SEND: "ready",
                 ComplaintStatus.SENT: "sent",
                 ComplaintStatus.CLOSED: "closed",
             }[complaint.status],
@@ -149,11 +204,11 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
                 ComplaintStatus.DRAFT: "Draft",
                 ComplaintStatus.PENDING_APPROVAL: "Do akceptacji",
                 ComplaintStatus.ACCEPTED: "Zaakceptowana",
+                ComplaintStatus.READY_TO_SEND: "Gotowa do wysłania",
                 ComplaintStatus.SENT: "Wysłana",
                 ComplaintStatus.CLOSED: "Zamknięta",
             }[complaint.status],
             "card_fields": (
-                ("supplier", "Dostawca"),
                 ("material_product", "Materiał / produkt"),
                 ("quantity", "Ilość"),
                 ("defect_description", "Opis wady"),
@@ -163,6 +218,8 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             ),
             "panel_action_token": settings.panel_action_token,
             "outbox": outbox,
+            "email_draft": email_draft,
+            "suppliers": suppliers,
         },
     )
 
@@ -188,7 +245,6 @@ def merge_draft_action(
 def update_complaint_card_action(
     complaint_id: int,
     action_token: str = Form(...),
-    supplier: str = Form(default=""),
     material_product: str = Form(default=""),
     quantity: str = Form(default=""),
     defect_description: str = Form(default=""),
@@ -204,7 +260,6 @@ def update_complaint_card_action(
             db,
             complaint_id,
             values={
-                "supplier": supplier,
                 "material_product": material_product,
                 "quantity": quantity,
                 "defect_description": defect_description,
@@ -300,3 +355,168 @@ def split_draft_action(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     return RedirectResponse(f"{settings.root_path}/drafts/{target.id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/suppliers", response_class=HTMLResponse)
+def suppliers_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    suppliers = db.scalars(select(Supplier).order_by(Supplier.active.desc(), Supplier.name)).all()
+    return templates.TemplateResponse(
+        request=request,
+        name="suppliers.html",
+        context={
+            "active": "suppliers",
+            "suppliers": suppliers,
+            "panel_action_token": settings.panel_action_token,
+        },
+    )
+
+
+@app.post("/suppliers/save")
+def save_supplier_action(
+    action_token: str = Form(...),
+    supplier_id: int | None = Form(default=None),
+    name: str = Form(...),
+    email: str = Form(...),
+    contact_person: str = Form(default=""),
+    phone: str = Form(default=""),
+    notes: str = Form(default=""),
+    active: bool = Form(default=False),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        save_supplier(
+            db,
+            supplier_id=supplier_id,
+            name=name,
+            email=email,
+            contact_person=contact_person,
+            phone=phone,
+            notes=notes,
+            active=active,
+        )
+        db.commit()
+    except (DraftOperationError, IntegrityError) as error:
+        db.rollback()
+        detail = str(error) if isinstance(error, DraftOperationError) else "Nie udało się zapisać dostawcy"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from error
+    return RedirectResponse(f"{settings.root_path}/suppliers", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/supplier")
+def assign_supplier_action(
+    complaint_id: int,
+    supplier_id: int = Form(...),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        assign_supplier(db, complaint_id, supplier_id, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/drafts/{complaint_id}/prepare-email")
+def prepare_email_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        prepare_email_draft(db, complaint_id, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/drafts/{complaint_id}/email-draft")
+def update_email_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    recipient: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        update_email_draft(
+            db,
+            complaint_id,
+            recipient=recipient,
+            subject=subject,
+            body=body,
+            actor="panel",
+        )
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.get("/drafts/{complaint_id}/email.eml")
+def download_email(complaint_id: int, db: Session = Depends(get_db)) -> Response:
+    complaint = db.get(Complaint, complaint_id)
+    draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint_id))
+    if complaint is None or draft is None or complaint.status not in {
+        ComplaintStatus.READY_TO_SEND,
+        ComplaintStatus.SENT,
+        ComplaintStatus.CLOSED,
+    }:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email draft not found")
+
+    message = EmailMessage()
+    message["To"] = draft.recipient
+    message["Subject"] = draft.subject
+    message["X-Unsent"] = "1"
+    message.set_content(draft.body)
+    root = settings.data_root.resolve()
+    for attachment in selected_attachments(db, complaint.id):
+        path = (settings.data_root / attachment.storage_path).resolve()
+        if root not in path.parents or not path.is_file():
+            continue
+        main_type, sub_type = (attachment.mime_type.split("/", 1) + ["octet-stream"])[:2]
+        message.add_attachment(
+            path.read_bytes(),
+            maintype=main_type,
+            subtype=sub_type,
+            filename=attachment.original_filename,
+        )
+    safe_number = (complaint.official_number or complaint.draft_number).replace("/", "-")
+    return Response(
+        content=message.as_bytes(),
+        media_type="message/rfc822",
+        headers={"Content-Disposition": f'attachment; filename="reklamacja-{safe_number}.eml"'},
+    )
+
+
+@app.post("/drafts/{complaint_id}/mark-sent")
+def mark_sent_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        mark_manually_sent(db, complaint_id, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )

@@ -1,0 +1,73 @@
+.form-grid select {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.form-grid :disabled {
+  background: #f0f2f0;
+  color: var(--muted);
+}
+
+.supplier-assignment,
+.correspondence-panel {
+  margin-bottom: 18px;
+}
+
+.supplier-assignment form,
+.correspondence-actions,
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.supplier-assignment select,
+.filter-bar select,
+.filter-bar input {
+  min-width: 190px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+}
+
+.supplier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.filter-bar {
+  margin-bottom: 20px;
+}
+
+.filter-bar input {
+  flex: 1;
+}
+
+.correspondence-actions {
+  margin-top: 16px;
+}
+
+.correspondence-actions form {
+  margin: 0;
+}
+
+.button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}

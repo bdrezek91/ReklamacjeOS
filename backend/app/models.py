@@ -26,6 +26,7 @@ class ComplaintStatus(str, enum.Enum):
     DRAFT = "draft"
     PENDING_APPROVAL = "pending_approval"
     ACCEPTED = "accepted"
+    READY_TO_SEND = "ready_to_send"
     SENT = "sent"
     CLOSED = "closed"
 
@@ -54,6 +55,9 @@ class Complaint(Base):
     merged_into_id: Mapped[int | None] = mapped_column(
         ForeignKey("complaints.id", ondelete="SET NULL"), index=True
     )
+    supplier_id: Mapped[int | None] = mapped_column(
+        ForeignKey("suppliers.id", ondelete="SET NULL"), index=True
+    )
     status: Mapped[ComplaintStatus] = mapped_column(Enum(ComplaintStatus), default=ComplaintStatus.DRAFT)
     approved_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -68,6 +72,25 @@ class Complaint(Base):
     merged_into: Mapped[Complaint | None] = relationship(
         remote_side="Complaint.id", foreign_keys=[merged_into_id]
     )
+    supplier: Mapped[Supplier | None] = relationship(back_populates="complaints")
+
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    contact_person: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(64))
+    notes: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    complaints: Mapped[list[Complaint]] = relationship(back_populates="supplier")
 
 
 class WhatsAppMessage(Base):
@@ -156,7 +179,9 @@ class EmailDraft(Base):
     __tablename__ = "email_drafts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    complaint_id: Mapped[int] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"), index=True)
+    complaint_id: Mapped[int] = mapped_column(
+        ForeignKey("complaints.id", ondelete="CASCADE"), unique=True, index=True
+    )
     recipient: Mapped[str] = mapped_column(String(320), nullable=False)
     subject: Mapped[str] = mapped_column(String(998), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
