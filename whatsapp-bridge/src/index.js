@@ -1,5 +1,8 @@
 const axios = require("axios");
+const fs = require("fs");
 const FormData = require("form-data");
+const http = require("http");
+const path = require("path");
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 
@@ -12,6 +15,7 @@ const config = {
   maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 15 * 1024 * 1024),
   chromiumPath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium",
   proxyServer: process.env.WHATSAPP_PROXY_SERVER || "",
+  healthPort: Number(process.env.HEALTH_PORT || 3001),
 };
 
 if (!config.token) {
@@ -41,12 +45,44 @@ const client = new Client({
 });
 
 const processing = new Set();
+let whatsappReady = false;
 
 function log(message, metadata = {}) {
   const safe = { ...metadata };
   delete safe.token;
   console.log(JSON.stringify({ time: new Date().toISOString(), message, ...safe }));
 }
+
+function clearStaleChromiumLocks() {
+  const profilePath = path.join(config.sessionPath, `session-${config.clientId}`);
+  let removed = 0;
+
+  for (const name of ["SingletonCookie", "SingletonLock", "SingletonSocket"]) {
+    try {
+      fs.unlinkSync(path.join(profilePath, name));
+      removed += 1;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
+  if (removed) log("Usunięto nieaktualne blokady profilu Chromium", { count: removed });
+}
+
+const healthServer = http.createServer((request, response) => {
+  if (request.url !== "/health") {
+    response.writeHead(404, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ status: "not_found" }));
+    return;
+  }
+
+  response.writeHead(whatsappReady ? 200 : 503, { "Content-Type": "application/json" });
+  response.end(JSON.stringify({ status: whatsappReady ? "ready" : "starting" }));
+});
+
+healthServer.listen(config.healthPort, "0.0.0.0", () => {
+  log("Endpoint zdrowia bridge uruchomiony", { port: config.healthPort });
+});
 
 async function printGroups() {
   const chats = await client.getChats();
@@ -161,9 +197,16 @@ client.on("qr", (qr) => {
 });
 
 client.on("authenticated", () => log("WhatsApp uwierzytelniony"));
-client.on("auth_failure", (error) => log("Błąd uwierzytelnienia WhatsApp", { error }));
-client.on("disconnected", (reason) => log("WhatsApp rozłączony", { reason }));
+client.on("auth_failure", (error) => {
+  whatsappReady = false;
+  log("Błąd uwierzytelnienia WhatsApp", { error });
+});
+client.on("disconnected", (reason) => {
+  whatsappReady = false;
+  log("WhatsApp rozłączony", { reason });
+});
 client.on("ready", async () => {
+  whatsappReady = true;
   log("WhatsApp bridge gotowy (tryb wyłącznie pasywny)");
   await printGroups().catch((error) => log("Nie udało się pobrać grup", { error: error.message }));
 });
@@ -174,11 +217,14 @@ client.on("message", forwardMessage);
 client.on("message_create", forwardMessage);
 
 process.on("SIGTERM", async () => {
+  whatsappReady = false;
   log("Zamykanie bridge");
+  healthServer.close();
   await client.destroy();
   process.exit(0);
 });
 
+clearStaleChromiumLocks();
 client.initialize().catch((error) => {
   log("Nie udało się uruchomić WhatsApp", { error: error.message });
   process.exit(1);
