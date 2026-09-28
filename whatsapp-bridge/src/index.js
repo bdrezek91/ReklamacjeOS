@@ -11,10 +11,24 @@ const config = {
   sessionPath: process.env.SESSION_PATH || "/app/session",
   maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES || 15 * 1024 * 1024),
   chromiumPath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium",
+  proxyServer: process.env.WHATSAPP_PROXY_SERVER || "",
 };
 
 if (!config.token) {
   throw new Error("BRIDGE_API_TOKEN is required");
+}
+
+const chromiumArgs = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  "--no-zygote",
+];
+
+if (config.proxyServer) {
+  chromiumArgs.push(`--proxy-server=${config.proxyServer}`);
+  log("Ruch WhatsApp Web korzysta z proxy podczas parowania");
 }
 
 const client = new Client({
@@ -22,13 +36,7 @@ const client = new Client({
   puppeteer: {
     executablePath: config.chromiumPath,
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-zygote",
-    ],
+    args: chromiumArgs,
   },
 });
 
@@ -175,4 +183,3 @@ client.initialize().catch((error) => {
   log("Nie udało się uruchomić WhatsApp", { error: error.message });
   process.exit(1);
 });
-

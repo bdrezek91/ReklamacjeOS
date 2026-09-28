@@ -49,6 +49,7 @@ services:
       BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN}
       WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
       WHATSAPP_CLIENT_ID: ${WHATSAPP_CLIENT_ID:-reklamacje-os}
+      WHATSAPP_PROXY_SERVER: ${WHATSAPP_PROXY_SERVER:-}
       SESSION_PATH: /app/session
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
       TZ: ${TZ:-Europe/Warsaw}
@@ -90,4 +91,3 @@ volumes:
 networks:
   internal:
     driver: bridge
-
