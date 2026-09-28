@@ -11,7 +11,10 @@
         <article class="message-card">
           <div class="message-meta">
             <strong>{{ message.author_name or message.author_id or 'Nieznany autor' }}</strong>
-            <time datetime="{{ message.source_timestamp.isoformat() }}">{{ message.source_timestamp.strftime('%d.%m.%Y %H:%M:%S') }}</time>
+            <div class="message-meta-right">
+              {% if message.complaint %}<a class="draft-link" href="{{ root_path }}/drafts/{{ message.complaint.id }}">{{ message.complaint.draft_number }}</a>{% endif %}
+              <time datetime="{{ message.source_timestamp.isoformat() }}">{{ message.source_timestamp.strftime('%d.%m.%Y %H:%M:%S') }}</time>
+            </div>
           </div>
           {% if message.body %}<p class="message-body">{{ message.body }}</p>{% endif %}
           {% if message.attachments %}
@@ -29,6 +32,6 @@
       {% endfor %}
     </section>
   {% else %}
-    <section class="empty-state"><h2>Brak wiadomości</h2><p>Po sparowaniu WhatsApp i ustawieniu ID grupy nowe wpisy pojawią się tutaj.</p></section>
+    <section class="empty-state"><h2>Brak wiadomości</h2><p>Nowe wpisy z wybranej grupy WhatsApp pojawią się tutaj i zostaną przypisane do draftów.</p></section>
   {% endif %}
 {% endblock %}

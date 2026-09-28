@@ -3,11 +3,26 @@
 {% block content %}
   <div class="page-heading"><div><p class="eyebrow">Reklamacje</p><h1>{{ title }}</h1></div></div>
   {% if complaints %}
-    <section class="panel">
-      {% for complaint in complaints %}<p><strong>{{ complaint.official_number or complaint.draft_number }}</strong></p>{% endfor %}
+    <section class="draft-grid">
+      {% for complaint in complaints %}
+        {% set ordered_messages = complaint.messages|sort(attribute='source_timestamp') %}
+        {% set counts = namespace(attachments=0) %}
+        {% for message in ordered_messages %}{% set counts.attachments = counts.attachments + message.attachments|length %}{% endfor %}
+        <article class="draft-card">
+          <div class="draft-card-head">
+            <a href="{{ root_path }}/drafts/{{ complaint.id }}">{{ complaint.official_number or complaint.draft_number }}</a>
+            <span class="badge">{{ ordered_messages|length }} wiad. · {{ counts.attachments }} zdj.</span>
+          </div>
+          {% if ordered_messages %}
+            <p class="draft-time">{{ ordered_messages[0].source_timestamp.strftime('%d.%m.%Y %H:%M') }} – {{ ordered_messages[-1].source_timestamp.strftime('%H:%M') }}</p>
+            {% set preview = ordered_messages|selectattr('body')|map(attribute='body')|list %}
+            <p>{{ preview[0] if preview else 'Wiadomości bez tekstu' }}</p>
+          {% endif %}
+          <a class="button secondary" href="{{ root_path }}/drafts/{{ complaint.id }}">Otwórz draft</a>
+        </article>
+      {% endfor %}
     </section>
   {% else %}
-    <section class="empty-state"><h2>Ta lista jest pusta</h2><p>Obsługa draftów zostanie dodana w Etapie 2.</p></section>
+    <section class="empty-state"><h2>Ta lista jest pusta</h2><p>Nowe wiadomości utworzą draft automatycznie.</p></section>
   {% endif %}
 {% endblock %}
-

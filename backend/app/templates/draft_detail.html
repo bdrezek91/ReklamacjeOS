@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ complaint.draft_number }} · ReklamacjeOS{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><p class="eyebrow">Draft reklamacji</p><h1>{{ complaint.draft_number }}</h1></div>
+    <span class="badge">{{ messages|length }} wiad. · {{ attachment_count }} zdj.</span>
+  </div>
+
+  {% if complaint.merged_into %}
+    <section class="notice warning">
+      Ten draft został scalony do
+      <a href="{{ root_path }}/drafts/{{ complaint.merged_into.id }}">{{ complaint.merged_into.draft_number }}</a>.
+    </section>
+  {% else %}
+    <section class="panel draft-actions">
+      <div>
+        <h2>Scal cały draft</h2>
+        {% if targets %}
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/merge" onsubmit="return confirm('Przenieść wszystkie wiadomości do wybranego draftu?')">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <label>Draft docelowy
+              <select name="target_complaint_id" required>
+                {% for target in targets %}<option value="{{ target.id }}">{{ target.draft_number }}</option>{% endfor %}
+              </select>
+            </label>
+            <button class="button danger" type="submit">Scal drafty</button>
+          </form>
+        {% else %}
+          <p class="muted">Brak innego aktywnego draftu.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h2>Rozdziel wiadomości</h2>
+        <p class="muted">Zaznacz wiadomości poniżej. Powstanie z nich nowy draft, a oryginały i zdjęcia pozostaną bez zmian.</p>
+      </div>
+    </section>
+  {% endif %}
+
+  {% if messages %}
+    <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/split">
+      <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+      <section class="timeline selectable-timeline">
+        {% for message in messages %}
+          <article class="message-card selectable-message">
+            {% if not complaint.merged_into %}
+              <label class="select-message"><input type="checkbox" name="message_ids" value="{{ message.id }}"> Wydziel tę wiadomość</label>
+            {% endif %}
+            <div class="message-meta">
+              <strong>{{ message.author_name or message.author_id or 'Nieznany autor' }}</strong>
+              <time datetime="{{ message.source_timestamp.isoformat() }}">{{ message.source_timestamp.strftime('%d.%m.%Y %H:%M:%S') }}</time>
+            </div>
+            {% if message.body %}<p class="message-body">{{ message.body }}</p>{% endif %}
+            {% if message.attachments %}
+              <div class="gallery">
+                {% for attachment in message.attachments %}
+                  <a href="{{ root_path }}/media/{{ attachment.id }}" target="_blank" rel="noopener">
+                    <img src="{{ root_path }}/media/{{ attachment.id }}" alt="{{ attachment.original_filename }}" loading="lazy">
+                    <span>{{ attachment.original_filename }}</span>
+                  </a>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <div class="source-id">ID: {{ message.wa_message_id }} · typ: {{ message.message_type }}</div>
+          </article>
+        {% endfor %}
+      </section>
+      {% if not complaint.merged_into and messages|length > 1 %}
+        <div class="sticky-action"><button class="button" type="submit">Utwórz nowy draft z zaznaczonych</button></div>
+      {% endif %}
+    </form>
+  {% else %}
+    <section class="empty-state"><h2>Brak wiadomości</h2><p>Wiadomości tego draftu zostały przeniesione podczas scalania.</p></section>
+  {% endif %}
+
+  <section class="panel audit-panel">
+    <h2>Historia zmian</h2>
+    {% if events %}
+      <div class="audit-list">
+        {% for event in events %}
+          <div><strong>{{ event.event_type }}</strong><span>{{ event.created_at.strftime('%d.%m.%Y %H:%M:%S') }} · {{ event.actor }}</span></div>
+        {% endfor %}
+      </div>
+    {% else %}<p class="muted">Brak zdarzeń.</p>{% endif %}
+  </section>
+{% endblock %}

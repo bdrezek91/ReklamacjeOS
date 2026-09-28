@@ -1,6 +1,6 @@
 # ReklamacjeOS
 
-Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 1**: pasywny odczyt jednej grupy WhatsApp, zapis wiadomości w PostgreSQL, zapis oryginalnych zdjęć na dysku oraz chroniony panel WWW.
+Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 2**: pasywny odczyt jednej grupy WhatsApp, zapis danych źródłowych oraz deterministyczne grupowanie wiadomości i zdjęć w drafty reklamacji.
 
 > `whatsapp-web.js` nie jest oficjalnym API Meta. Zmiany po stronie WhatsApp mogą wymagać aktualizacji bridge'a, a używanie nieoficjalnego klienta wiąże się z ryzykiem wylogowania lub ograniczenia konta. V1 nie zawiera żadnego kodu wysyłającego wiadomości na WhatsApp.
 
@@ -14,6 +14,9 @@ Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap
 - idempotencja przez unikalne `wa_message_id`,
 - oryginalne obrazy na dysku i metadane w PostgreSQL,
 - prosty panel z Dashboardem i chronologicznym inboxem,
+- automatyczne drafty `DRAFT-xxxx`: cytowana wiadomość ma pierwszeństwo, a pozostałe wpisy tego samego autora są łączone w konfigurowalnym oknie czasu,
+- ręczne rozdzielanie wiadomości do nowego draftu i nieusuwające scalanie draftów,
+- dziennik utworzenia, przypisania, rozdzielenia i scalenia,
 - Caddy z obowiązkowym HTTP Basic Auth,
 - migracje Alembic i schemat przygotowany pod reklamacje, audyt, dane AI oraz przyszłe maile.
 
@@ -94,6 +97,18 @@ Po `docker compose up -d --force-recreate caddy` Caddy automatycznie pobierze ce
 
 Kopia zapasowa musi obejmować bazę oraz `complaint_data`. Sam backup PostgreSQL nie zawiera zdjęć.
 
+Usługa `backup` wykonuje `pg_dump` i synchronizuje zdjęcia co 24 godziny bez zatrzymywania aplikacji. Nie usuwa starszych dumpów ani plików. Jej healthcheck przechodzi w stan `unhealthy`, gdy ostatnia kopia ma ponad 30 godzin lub wolne miejsce spadnie poniżej skonfigurowanego progu.
+
+## Grupowanie Etapu 2
+
+Każda nowa wiadomość otrzymuje draft w tej samej transakcji co zapis źródła:
+
+1. Jeżeli cytuje zapisaną wiadomość, trafia do jej aktywnego draftu.
+2. W przeciwnym razie trafia do ostatniego aktywnego draftu tego samego autora i grupy, jeżeli mieści się w `GROUPING_WINDOW_MINUTES`.
+3. Jeżeli żadna reguła nie pasuje, powstaje kolejny `DRAFT-xxxx`.
+
+Operacje ręczne wymagają `PANEL_ACTION_TOKEN`. Rozdzielenie przenosi wybrane wiadomości do nowego draftu. Scalenie przenosi wszystkie wiadomości do draftu docelowego, zachowuje rekord źródłowego draftu i zapisuje zdarzenia audytowe po obu stronach.
+
 ## Diagnostyka
 
 ```bash
@@ -129,7 +144,7 @@ Testy backendu obejmują odrzucenie obcej grupy, idempotencję wiadomości i zap
 
 ## Zakres kolejnych etapów
 
-- **Etap 2:** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
+- **Etap 2 (aktualny):** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
 - **Etap 3:** pełna karta reklamacji, galeria, historia zmian i numeracja `REK-YYYY-xxxx` dopiero po akceptacji.
 - **Etap 4:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.
 - **Etap 5:** edytowalny mail, ręczne „AKCEPTUJ I WYŚLIJ” oraz wysyłka SMTP. Bez IMAP.

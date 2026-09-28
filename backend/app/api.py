@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
 from .db import get_db
-from .models import Attachment, WhatsAppMessage
+from .models import Attachment, Complaint, WhatsAppMessage
+from .services.grouping import assign_message_to_draft
 from .services.storage import store_original_media
 
 router = APIRouter()
@@ -45,7 +46,16 @@ async def ingest_whatsapp_message(
 
     existing = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.wa_message_id == wa_message_id))
     if existing:
-        return {"id": existing.id, "created": False}
+        complaint = db.get(Complaint, existing.complaint_id) if existing.complaint_id else None
+        if existing.complaint_id is None:
+            complaint, _ = assign_message_to_draft(db, existing)
+            db.commit()
+        return {
+            "id": existing.id,
+            "created": False,
+            "complaint_id": existing.complaint_id,
+            "draft_number": complaint.draft_number if complaint else None,
+        }
 
     try:
         payload = json.loads(source_payload)
@@ -83,6 +93,7 @@ async def ingest_whatsapp_message(
                     include_in_email=True,
                 )
             )
+        complaint, grouping_rule = assign_message_to_draft(db, message)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -91,7 +102,13 @@ async def ingest_whatsapp_message(
             return {"id": existing.id, "created": False}
         raise
 
-    return {"id": message.id, "created": True}
+    return {
+        "id": message.id,
+        "created": True,
+        "complaint_id": complaint.id,
+        "draft_number": complaint.draft_number,
+        "grouping_rule": grouping_rule,
+    }
 
 
 @router.get("/api/whatsapp/messages")
@@ -109,6 +126,7 @@ def list_whatsapp_messages(db: Session = Depends(get_db)) -> list[dict[str, obje
             "author_name": message.author_name,
             "body": message.body,
             "message_type": message.message_type,
+            "complaint_id": message.complaint_id,
             "source_timestamp": message.source_timestamp,
             "attachments": [
                 {

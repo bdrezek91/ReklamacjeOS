@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import enum
 from datetime import datetime
 from typing import Any
@@ -33,11 +35,22 @@ class Complaint(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     draft_number: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
     official_number: Mapped[str | None] = mapped_column(String(32), unique=True)
+    merged_into_id: Mapped[int | None] = mapped_column(
+        ForeignKey("complaints.id", ondelete="SET NULL"), index=True
+    )
     status: Mapped[ComplaintStatus] = mapped_column(Enum(ComplaintStatus), default=ComplaintStatus.DRAFT)
     approved_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    messages: Mapped[list[WhatsAppMessage]] = relationship(back_populates="complaint")
+    events: Mapped[list[ComplaintEvent]] = relationship(
+        back_populates="complaint", cascade="all, delete-orphan"
+    )
+    merged_into: Mapped[Complaint | None] = relationship(
+        remote_side="Complaint.id", foreign_keys=[merged_into_id]
     )
 
 
@@ -60,6 +73,7 @@ class WhatsAppMessage(Base):
     source_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="message", cascade="all, delete-orphan")
+    complaint: Mapped[Complaint | None] = relationship(back_populates="messages")
 
 
 class Attachment(Base):
@@ -87,6 +101,8 @@ class ComplaintEvent(Base):
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    complaint: Mapped[Complaint] = relationship(back_populates="events")
 
 
 class ComplaintField(Base):

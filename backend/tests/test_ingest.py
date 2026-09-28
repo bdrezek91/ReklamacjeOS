@@ -23,6 +23,8 @@ def make_client(tmp_path):
     object.__setattr__(settings, "bridge_api_token", "test-token")
     object.__setattr__(settings, "whatsapp_group_id", "allowed-group@g.us")
     object.__setattr__(settings, "data_root", tmp_path)
+    object.__setattr__(settings, "panel_action_token", "panel-test-token")
+    object.__setattr__(settings, "grouping_window_minutes", 10)
 
     def override_db():
         yield session
