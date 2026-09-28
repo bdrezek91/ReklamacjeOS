@@ -1,16 +1,38 @@
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Complaint, ComplaintEvent, ComplaintStatus, WhatsAppMessage
+from ..models import (
+    Complaint,
+    ComplaintEvent,
+    ComplaintNumberCounter,
+    ComplaintStatus,
+    WhatsAppMessage,
+)
 
 
 class DraftOperationError(ValueError):
     pass
+
+
+def allocate_official_number(db: Session, year: int) -> str:
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": 731_000_000 + year})
+
+    counter = db.get(ComplaintNumberCounter, year)
+    if counter is None:
+        sequence = 1
+        counter = ComplaintNumberCounter(year=year, next_value=2)
+        db.add(counter)
+    else:
+        sequence = counter.next_value
+        counter.next_value += 1
+    db.flush()
+    return f"REK-{year}-{sequence:04d}"
 
 
 def create_draft(
@@ -19,9 +41,12 @@ def create_draft(
     actor: str,
     rule: str,
     trigger_message_id: int | None = None,
+    number_year: int | None = None,
 ) -> Complaint:
+    official_number = allocate_official_number(db, number_year or datetime.now().year)
     complaint = Complaint(
         draft_number=f"PENDING-{uuid4().hex[:20]}",
+        official_number=official_number,
         status=ComplaintStatus.DRAFT,
     )
     db.add(complaint)
@@ -32,7 +57,19 @@ def create_draft(
             complaint_id=complaint.id,
             event_type="draft_created",
             actor=actor,
-            details={"rule": rule, "trigger_message_id": trigger_message_id},
+            details={
+                "rule": rule,
+                "trigger_message_id": trigger_message_id,
+                "official_number": official_number,
+            },
+        )
+    )
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint.id,
+            event_type="official_number_assigned",
+            actor=actor,
+            details={"official_number": official_number},
         )
     )
     return complaint
@@ -101,6 +138,7 @@ def assign_message_to_draft(
             actor=actor,
             rule="automatic",
             trigger_message_id=message.id,
+            number_year=message.source_timestamp.year,
         )
 
     message.complaint_id = complaint.id
@@ -125,6 +163,29 @@ def backfill_unassigned_messages(db: Session) -> int:
     for message in messages:
         assign_message_to_draft(db, message, actor="system:backfill")
     return len(messages)
+
+
+def backfill_official_numbers(db: Session) -> int:
+    complaints = db.scalars(
+        select(Complaint).where(Complaint.official_number.is_(None)).order_by(Complaint.id)
+    ).all()
+    for complaint in complaints:
+        first_timestamp = db.scalar(
+            select(func.min(WhatsAppMessage.source_timestamp)).where(
+                WhatsAppMessage.complaint_id == complaint.id
+            )
+        )
+        year = first_timestamp.year if first_timestamp else datetime.now().year
+        complaint.official_number = allocate_official_number(db, year)
+        db.add(
+            ComplaintEvent(
+                complaint_id=complaint.id,
+                event_type="official_number_assigned",
+                actor="system:backfill",
+                details={"official_number": complaint.official_number},
+            )
+        )
+    return len(complaints)
 
 
 def merge_drafts(db: Session, source_id: int, target_id: int, *, actor: str) -> Complaint:

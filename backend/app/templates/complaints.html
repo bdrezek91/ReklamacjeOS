@@ -13,12 +13,13 @@
             <a href="{{ root_path }}/drafts/{{ complaint.id }}">{{ complaint.official_number or complaint.draft_number }}</a>
             <span class="badge">{{ ordered_messages|length }} wiad. · {{ counts.attachments }} zdj.</span>
           </div>
+          <p class="technical-number">{{ complaint.draft_number }}</p>
           {% if ordered_messages %}
             <p class="draft-time">{{ ordered_messages[0].source_timestamp.strftime('%d.%m.%Y %H:%M') }} – {{ ordered_messages[-1].source_timestamp.strftime('%H:%M') }}</p>
             {% set preview = ordered_messages|selectattr('body')|map(attribute='body')|list %}
             <p>{{ preview[0] if preview else 'Wiadomości bez tekstu' }}</p>
           {% endif %}
-          <a class="button secondary" href="{{ root_path }}/drafts/{{ complaint.id }}">Otwórz draft</a>
+          <a class="button secondary" href="{{ root_path }}/drafts/{{ complaint.id }}">Otwórz reklamację</a>
         </article>
       {% endfor %}
     </section>

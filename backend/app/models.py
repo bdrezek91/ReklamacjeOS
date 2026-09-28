@@ -29,6 +29,13 @@ class ComplaintStatus(str, enum.Enum):
     CLOSED = "closed"
 
 
+class ComplaintNumberCounter(Base):
+    __tablename__ = "complaint_number_counters"
+
+    year: Mapped[int] = mapped_column(primary_key=True)
+    next_value: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 class Complaint(Base):
     __tablename__ = "complaints"
 

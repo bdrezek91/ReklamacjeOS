@@ -1,6 +1,6 @@
 # ReklamacjeOS
 
-Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 2**: pasywny odczyt jednej grupy WhatsApp, zapis danych źródłowych oraz deterministyczne grupowanie wiadomości i zdjęć w drafty reklamacji.
+Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 3**: pasywny odczyt jednej grupy WhatsApp, deterministyczne grupowanie źródeł oraz pełna karta reklamacji z numerem nadawanym przy jej utworzeniu.
 
 > `whatsapp-web.js` nie jest oficjalnym API Meta. Zmiany po stronie WhatsApp mogą wymagać aktualizacji bridge'a, a używanie nieoficjalnego klienta wiąże się z ryzykiem wylogowania lub ograniczenia konta. V1 nie zawiera żadnego kodu wysyłającego wiadomości na WhatsApp.
 
@@ -17,6 +17,8 @@ Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap
 - automatyczne drafty `DRAFT-xxxx`: cytowana wiadomość ma pierwszeństwo, a pozostałe wpisy tego samego autora są łączone w konfigurowalnym oknie czasu,
 - ręczne rozdzielanie wiadomości do nowego draftu i nieusuwające scalanie draftów,
 - dziennik utworzenia, przypisania, rozdzielenia i scalenia,
+- roczna numeracja `REK-YYYY-xxxx` nadawana od razu po utworzeniu reklamacji,
+- edytowalna karta reklamacji, wybór zdjęć i przejście do statusu „Do akceptacji”,
 - Caddy z obowiązkowym HTTP Basic Auth,
 - migracje Alembic i schemat przygotowany pod reklamacje, audyt, dane AI oraz przyszłe maile.
 
@@ -107,6 +109,8 @@ Każda nowa wiadomość otrzymuje draft w tej samej transakcji co zapis źródł
 2. W przeciwnym razie trafia do ostatniego aktywnego draftu tego samego autora i grupy, jeżeli mieści się w `GROUPING_WINDOW_MINUTES`.
 3. Jeżeli żadna reguła nie pasuje, powstaje kolejny `DRAFT-xxxx`.
 
+W tym samym momencie system nadaje niezmienny numer `REK-YYYY-xxxx`. Licznik jest osobny dla każdego roku i chroniony blokadą transakcyjną. Ręczne rozdzielenie tworzy nową reklamację z nowym numerem, a scalenie zachowuje oba numery w historii i pozostawia aktywny numer reklamacji docelowej.
+
 Operacje ręczne wymagają `PANEL_ACTION_TOKEN`. Rozdzielenie przenosi wybrane wiadomości do nowego draftu. Scalenie przenosi wszystkie wiadomości do draftu docelowego, zachowuje rekord źródłowego draftu i zapisuje zdarzenia audytowe po obu stronach.
 
 ## Diagnostyka
@@ -144,7 +148,7 @@ Testy backendu obejmują odrzucenie obcej grupy, idempotencję wiadomości i zap
 
 ## Zakres kolejnych etapów
 
-- **Etap 2 (aktualny):** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
-- **Etap 3:** pełna karta reklamacji, galeria, historia zmian i numeracja `REK-YYYY-xxxx` dopiero po akceptacji.
+- **Etap 2:** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
+- **Etap 3 (aktualny):** pełna karta reklamacji, galeria, historia zmian i numeracja `REK-YYYY-xxxx` przy utworzeniu reklamacji.
 - **Etap 4:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.
 - **Etap 5:** edytowalny mail, ręczne „AKCEPTUJ I WYŚLIJ” oraz wysyłka SMTP. Bez IMAP.

@@ -55,6 +55,7 @@ async def ingest_whatsapp_message(
             "created": False,
             "complaint_id": existing.complaint_id,
             "draft_number": complaint.draft_number if complaint else None,
+            "official_number": complaint.official_number if complaint else None,
         }
 
     try:
@@ -107,6 +108,7 @@ async def ingest_whatsapp_message(
         "created": True,
         "complaint_id": complaint.id,
         "draft_number": complaint.draft_number,
+        "official_number": complaint.official_number,
         "grouping_rule": grouping_rule,
     }
 

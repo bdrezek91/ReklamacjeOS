@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.models import Complaint, ComplaintEvent, WhatsAppMessage
+from app.models import Attachment, Complaint, ComplaintEvent, ComplaintField, ComplaintStatus, WhatsAppMessage
 
 from .test_ingest import make_client, payload
 
@@ -46,7 +46,9 @@ def test_groups_by_author_window_and_quoted_message(tmp_path):
 
     assert first.json()["complaint_id"] == close.json()["complaint_id"]
     assert len(first.json()["draft_number"]) <= 32
+    assert first.json()["official_number"] == "REK-2026-0001"
     assert late.json()["complaint_id"] != first.json()["complaint_id"]
+    assert late.json()["official_number"] == "REK-2026-0002"
     assert quoted.json()["complaint_id"] == first.json()["complaint_id"]
     assert quoted.json()["grouping_rule"] == "quoted_message"
     assert len(session.scalars(select(Complaint)).all()) == 2
@@ -57,6 +59,16 @@ def test_groups_by_author_window_and_quoted_message(tmp_path):
     draft_detail = client.get(f"/drafts/{first.json()['complaint_id']}")
     assert draft_detail.status_code == 200
     assert "panel-test-token" in draft_detail.text
+
+    next_year = client.post(
+        "/api/internal/whatsapp/messages",
+        data=payload(
+            wa_message_id="next-year",
+            source_timestamp=datetime(2027, 1, 2, tzinfo=timezone.utc).isoformat(),
+        ),
+        headers=headers,
+    )
+    assert next_year.json()["official_number"] == "REK-2027-0001"
 
 
 def test_manual_split_and_merge_preserve_messages_and_audit(tmp_path):
@@ -88,6 +100,7 @@ def test_manual_split_and_merge_preserve_messages_and_audit(tmp_path):
     active = session.scalars(select(Complaint).where(Complaint.merged_into_id.is_(None))).all()
     assert len(active) == 2
     target = next(complaint for complaint in active if complaint.id != source_id)
+    assert target.official_number == "REK-2026-0002"
     assert session.get(WhatsAppMessage, messages[-1].id).complaint_id == target.id
 
     merge = client.post(
@@ -115,3 +128,49 @@ def test_panel_actions_require_token(tmp_path):
         data={"action_token": "wrong", "target_complaint_id": complaint.id},
     )
     assert response.status_code == 403
+
+
+def test_updates_card_gallery_and_status_with_audit(tmp_path):
+    client, session = make_client(tmp_path)
+    response = client.post(
+        "/api/internal/whatsapp/messages",
+        data=payload(wa_message_id="card-photo"),
+        files={"media": ("wada.jpg", b"card-photo-content", "image/jpeg")},
+        headers={"Authorization": "Bearer test-token"},
+    )
+    complaint_id = response.json()["complaint_id"]
+    attachment = session.scalar(select(Attachment))
+
+    update = client.post(
+        f"/drafts/{complaint_id}/card",
+        data={
+            "action_token": "panel-test-token",
+            "supplier": "Dostawca A",
+            "material_product": "Płyta X",
+            "quantity": "4 szt.",
+            "defect_description": "Uszkodzone zamki",
+            "document_number": "FV/123",
+            "customer_project": "Projekt Z",
+            "notes": "Pilne",
+            "attachment_ids": str(attachment.id),
+        },
+        follow_redirects=False,
+    )
+    assert update.status_code == 303
+
+    status_update = client.post(
+        f"/drafts/{complaint_id}/status",
+        data={"action_token": "panel-test-token", "target_status": "pending_approval"},
+        follow_redirects=False,
+    )
+    assert status_update.status_code == 303
+
+    session.expire_all()
+    complaint = session.get(Complaint, complaint_id)
+    assert complaint.official_number == "REK-2026-0001"
+    assert complaint.approved_data["supplier"] == "Dostawca A"
+    assert complaint.status == ComplaintStatus.PENDING_APPROVAL
+    assert session.get(Attachment, attachment.id).include_in_email is True
+    assert len(session.scalars(select(ComplaintField)).all()) == 7
+    event_types = set(session.scalars(select(ComplaintEvent.event_type)).all())
+    assert {"official_number_assigned", "complaint_card_updated", "status_changed"} <= event_types

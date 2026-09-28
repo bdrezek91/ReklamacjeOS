@@ -1,12 +1,13 @@
 from .db import SessionLocal
-from .services.grouping import backfill_unassigned_messages
+from .services.grouping import backfill_official_numbers, backfill_unassigned_messages
 
 
 def main() -> None:
     with SessionLocal() as db:
         count = backfill_unassigned_messages(db)
+        numbered = backfill_official_numbers(db)
         db.commit()
-    print(f"Stage 2 grouping backfill: assigned={count}")
+    print(f"Complaint backfill: assigned={count} numbered={numbered}")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from .api import router as api_router
 from .config import settings
 from .db import get_db
 from .models import Attachment, Complaint, ComplaintStatus, WhatsAppMessage
+from .services.complaints import change_complaint_status, update_complaint_card
 from .services.grouping import DraftOperationError, merge_drafts, split_draft
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -117,6 +118,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     messages = sorted(complaint.messages, key=lambda message: (message.source_timestamp, message.id))
     events = sorted(complaint.events, key=lambda event: (event.created_at, event.id), reverse=True)
     attachment_count = sum(len(message.attachments) for message in messages)
+    attachments = [attachment for message in messages for attachment in message.attachments]
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
@@ -127,6 +129,23 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "events": events,
             "targets": targets,
             "attachment_count": attachment_count,
+            "attachments": attachments,
+            "card_data": complaint.approved_data or {},
+            "status_label": {
+                ComplaintStatus.DRAFT: "Draft",
+                ComplaintStatus.PENDING_APPROVAL: "Do akceptacji",
+                ComplaintStatus.SENT: "Wysłana",
+                ComplaintStatus.CLOSED: "Zamknięta",
+            }[complaint.status],
+            "card_fields": (
+                ("supplier", "Dostawca"),
+                ("material_product", "Materiał / produkt"),
+                ("quantity", "Ilość"),
+                ("defect_description", "Opis wady"),
+                ("document_number", "Numer zamówienia lub faktury"),
+                ("customer_project", "Klient / projekt"),
+                ("notes", "Uwagi"),
+            ),
             "panel_action_token": settings.panel_action_token,
         },
     )
@@ -147,6 +166,66 @@ def merge_draft_action(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     return RedirectResponse(f"{settings.root_path}/drafts/{target.id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/card")
+def update_complaint_card_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    supplier: str = Form(default=""),
+    material_product: str = Form(default=""),
+    quantity: str = Form(default=""),
+    defect_description: str = Form(default=""),
+    document_number: str = Form(default=""),
+    customer_project: str = Form(default=""),
+    notes: str = Form(default=""),
+    attachment_ids: list[int] | None = Form(default=None),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        update_complaint_card(
+            db,
+            complaint_id,
+            values={
+                "supplier": supplier,
+                "material_product": material_product,
+                "quantity": quantity,
+                "defect_description": defect_description,
+                "document_number": document_number,
+                "customer_project": customer_project,
+                "notes": notes,
+            },
+            included_attachment_ids=attachment_ids or [],
+            actor="panel",
+        )
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/drafts/{complaint_id}/status")
+def change_complaint_status_action(
+    complaint_id: int,
+    target_status: str = Form(...),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        parsed_status = ComplaintStatus(target_status)
+        change_complaint_status(db, complaint_id, parsed_status, actor="panel")
+        db.commit()
+    except (DraftOperationError, ValueError) as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @app.post("/drafts/{complaint_id}/split")
