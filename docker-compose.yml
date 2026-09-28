@@ -1,0 +1,93 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ:-Europe/Warsaw}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN}
+      WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
+      DATA_ROOT: /data/reklamacje
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
+      TZ: ${TZ:-Europe/Warsaw}
+    volumes:
+      - complaint_data:/data/reklamacje
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [internal]
+
+  whatsapp:
+    build:
+      context: ./whatsapp-bridge
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8000
+      BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN}
+      WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
+      WHATSAPP_CLIENT_ID: ${WHATSAPP_CLIENT_ID:-reklamacje-os}
+      SESSION_PATH: /app/session
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-15728640}
+      TZ: ${TZ:-Europe/Warsaw}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    volumes:
+      - whatsapp_session:/app/session
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      PANEL_USER: ${PANEL_USER}
+      PANEL_PASSWORD_HASH: ${PANEL_PASSWORD_HASH}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+volumes:
+  postgres_data:
+  complaint_data:
+  whatsapp_session:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge
+

@@ -1,0 +1,15 @@
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	basic_auth {
+		{$PANEL_USER} {$PANEL_PASSWORD_HASH}
+	}
+
+	reverse_proxy backend:8000
+
+	log {
+		output stdout
+		format console
+	}
+}
+
