@@ -1,0 +1,135 @@
+# ReklamacjeOS
+
+Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 1**: pasywny odczyt jednej grupy WhatsApp, zapis wiadomości w PostgreSQL, zapis oryginalnych zdjęć na dysku oraz chroniony panel WWW.
+
+> `whatsapp-web.js` nie jest oficjalnym API Meta. Zmiany po stronie WhatsApp mogą wymagać aktualizacji bridge'a, a używanie nieoficjalnego klienta wiąże się z ryzykiem wylogowania lub ograniczenia konta. V1 nie zawiera żadnego kodu wysyłającego wiadomości na WhatsApp.
+
+## Co działa
+
+- QR przy pierwszym połączeniu i trwała sesja `LocalAuth` w wolumenie Dockera,
+- wypisanie nazw i ID wszystkich grup po zalogowaniu,
+- tryb odkrywania, gdy `WHATSAPP_GROUP_ID` jest pusty,
+- ingest wyłącznie jednej whitelisted grupy; prywatne rozmowy i inne grupy są odrzucane przed pobraniem mediów,
+- tekst, autor, oryginalny czas, ID wiadomości, reply/quoted ID i obrazy,
+- idempotencja przez unikalne `wa_message_id`,
+- oryginalne obrazy na dysku i metadane w PostgreSQL,
+- prosty panel z Dashboardem i chronologicznym inboxem,
+- Caddy z obowiązkowym HTTP Basic Auth,
+- migracje Alembic i schemat przygotowany pod reklamacje, audyt, dane AI oraz przyszłe maile.
+
+## Architektura
+
+```text
+WhatsApp Web (LocalAuth)
+        │ tylko odczyt
+        ▼
+Node.js bridge ── Bearer token ──► FastAPI ──► PostgreSQL
+                                      │
+                                      └──────► /data/reklamacje (oryginały)
+
+Przeglądarka ── Basic Auth ──► Caddy ──► FastAPI/Jinja
+```
+
+Backend i PostgreSQL nie publikują portów na hosta. Jedynym publicznym wejściem jest Caddy na portach 80/443.
+
+## Uruchomienie na VPS
+
+Wymagania: Linux, Docker Engine z pluginem Compose oraz repozytorium sklonowane na VPS.
+
+```bash
+git clone https://github.com/bdrezek91/ReklamacjeOS.git
+cd ReklamacjeOS
+cp .env.example .env
+```
+
+Wygeneruj sekrety:
+
+```bash
+openssl rand -hex 32
+openssl rand -hex 32
+docker run --rm caddy:2.8-alpine caddy hash-password --plaintext 'TUTAJ_MOCNE_HASLO_PANELU'
+```
+
+W `.env` ustaw osobno wygenerowane wartości jako `POSTGRES_PASSWORD`, hasło także wewnątrz `DATABASE_URL`, `BRIDGE_API_TOKEN` oraz wynik bcrypt jako `PANEL_PASSWORD_HASH`. Hash bcrypt zawiera znaki `$`, dlatego wpisz go w pojedynczym cudzysłowie, np. `PANEL_PASSWORD_HASH='$2a$...'`. Nie commituj `.env`.
+
+### Pierwsze parowanie i wybór grupy
+
+1. Zostaw `WHATSAPP_GROUP_ID=` puste.
+2. Uruchom system:
+
+   ```bash
+   docker compose up -d --build
+   docker compose logs -f whatsapp
+   ```
+
+3. Zeskanuj QR: WhatsApp → Ustawienia → Połączone urządzenia → Połącz urządzenie.
+4. Po komunikacie `Dostępne grupy WhatsApp` skopiuj dokładne ID właściwej grupy (`...@g.us`).
+5. Wpisz je do `.env` jako `WHATSAPP_GROUP_ID`.
+6. Odtwórz backend i bridge z nową konfiguracją:
+
+   ```bash
+   docker compose up -d --force-recreate backend whatsapp
+   docker compose logs -f whatsapp
+   ```
+
+Sesja jest w nazwanym wolumenie `whatsapp_session`, więc zwykły restart lub przebudowa kontenera jej nie usuwa. Nie uruchamiaj `docker compose down -v`, jeśli chcesz zachować sesję i dane.
+
+### Panel i HTTPS
+
+Przy `SITE_ADDRESS=:80` panel działa pod adresem IP VPS przez HTTP i wymaga loginu/hasła z `.env`.
+
+Dla HTTPS ustaw rekord DNS na VPS, a następnie:
+
+```dotenv
+SITE_ADDRESS=reklamacje.twojadomena.pl
+```
+
+Po `docker compose up -d --force-recreate caddy` Caddy automatycznie pobierze certyfikat.
+
+## Dane i kopie zapasowe
+
+- PostgreSQL: wolumen `postgres_data`.
+- Zdjęcia: wolumen `complaint_data`, logicznie `/data/reklamacje/<rok>/INBOX/whatsapp/<id>/original/`.
+- Sesja WhatsApp: wolumen `whatsapp_session`.
+
+Kopia zapasowa musi obejmować bazę oraz `complaint_data`. Sam backup PostgreSQL nie zawiera zdjęć.
+
+## Diagnostyka
+
+```bash
+docker compose ps
+docker compose logs --tail=200 backend
+docker compose logs --tail=200 whatsapp
+docker compose logs --tail=200 caddy
+curl -u 'admin:HASLO' http://ADRES_VPS/health
+```
+
+Jeżeli bridge nie pokazuje QR, usuń wyłącznie wolumen sesji dopiero po świadomej decyzji o ponownym parowaniu.
+
+## Testy lokalne
+
+```bash
+cd backend
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements-dev.txt
+DATABASE_URL=sqlite:///./test.db pytest -q
+ruff check app tests alembic
+
+cd ../whatsapp-bridge
+npm ci --ignore-scripts
+npm run check
+
+cd ..
+docker compose --env-file .env.example config --quiet
+docker compose build
+```
+
+Testy backendu obejmują odrzucenie obcej grupy, idempotencję wiadomości i zapis oryginalnego obrazu.
+
+## Zakres kolejnych etapów
+
+- **Etap 2:** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
+- **Etap 3:** pełna karta reklamacji, galeria, historia zmian i numeracja `REK-YYYY-xxxx` dopiero po akceptacji.
+- **Etap 4:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.
+- **Etap 5:** edytowalny mail, ręczne „AKCEPTUJ I WYŚLIJ” oraz wysyłka SMTP. Bez IMAP.
