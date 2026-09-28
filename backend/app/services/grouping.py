@@ -21,7 +21,7 @@ def create_draft(
     trigger_message_id: int | None = None,
 ) -> Complaint:
     complaint = Complaint(
-        draft_number=f"PENDING-{uuid4().hex}",
+        draft_number=f"PENDING-{uuid4().hex[:20]}",
         status=ComplaintStatus.DRAFT,
     )
     db.add(complaint)

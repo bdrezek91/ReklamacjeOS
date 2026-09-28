@@ -45,6 +45,7 @@ def test_groups_by_author_window_and_quoted_message(tmp_path):
     )
 
     assert first.json()["complaint_id"] == close.json()["complaint_id"]
+    assert len(first.json()["draft_number"]) <= 32
     assert late.json()["complaint_id"] != first.json()["complaint_id"]
     assert quoted.json()["complaint_id"] == first.json()["complaint_id"]
     assert quoted.json()["grouping_rule"] == "quoted_message"
