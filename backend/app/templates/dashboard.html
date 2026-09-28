@@ -10,12 +10,13 @@
     <article><span>Oryginalne zdjęcia</span><strong>{{ attachment_count }}</strong></article>
     <article><span>Drafty</span><strong>{{ draft_count }}</strong></article>
     <article><span>Do akceptacji</span><strong>{{ pending_count }}</strong></article>
+    <article><span>Zaakceptowane</span><strong>{{ accepted_count }}</strong></article>
   </section>
   <section class="panel">
-    <h2>Stan Etapu 2</h2>
-    <p>Bridge zapisuje wyłącznie wiadomości ze skonfigurowanej grupy, a reguły deterministyczne przypisują je do draftów. Dane źródłowe i oryginalne pliki pozostają niezmienione.</p>
+    <h2>Stan Etapu 3</h2>
+    <p>Po akceptacji system nadaje krótki numer reklamacji i przekazuje go na grupę WhatsApp jako oznaczenie reklamowanych płyt.</p>
     <div class="checklist">
-      <span>✓ PostgreSQL</span><span>✓ Oryginalne pliki</span><span>✓ Grupowanie</span><span>✓ Łączenie i rozdzielanie</span>
+      <span>✓ PostgreSQL</span><span>✓ Oryginalne pliki</span><span>✓ Grupowanie</span><span>✓ Numer po akceptacji</span>
     </div>
   </section>
 {% endblock %}

@@ -3,14 +3,14 @@ import secrets
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
 from .db import get_db
-from .models import Attachment, Complaint, WhatsAppMessage
+from .models import Attachment, Complaint, ComplaintEvent, WhatsAppMessage, WhatsAppOutbox
 from .services.grouping import assign_message_to_draft
 from .services.storage import store_original_media
 
@@ -22,6 +22,82 @@ def verify_bridge_token(authorization: str | None = Header(default=None)) -> Non
     supplied = authorization.removeprefix("Bearer ") if authorization else ""
     if not expected or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bridge token")
+
+
+@router.post(
+    "/api/internal/whatsapp/outbox/claim",
+    dependencies=[Depends(verify_bridge_token)],
+    response_model=None,
+)
+def claim_whatsapp_outbox(db: Session = Depends(get_db)) -> dict[str, object] | Response:
+    query = select(WhatsAppOutbox).where(WhatsAppOutbox.status == "pending").order_by(WhatsAppOutbox.id)
+    if db.get_bind().dialect.name == "postgresql":
+        query = query.with_for_update(skip_locked=True)
+    item = db.scalar(query.limit(1))
+    if item is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    item.status = "processing"
+    item.attempt_count += 1
+    item.claimed_at = datetime.now().astimezone()
+    db.commit()
+    return {"id": item.id, "group_id": item.group_id, "body": item.body}
+
+
+@router.post("/api/internal/whatsapp/outbox/{item_id}/sent", dependencies=[Depends(verify_bridge_token)])
+def mark_whatsapp_outbox_sent(
+    item_id: int,
+    wa_message_id: str = Form(...),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    item = db.get(WhatsAppOutbox, item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outbox item not found")
+    if item.status == "sent":
+        return {"ok": True}
+    if item.status != "processing":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Outbox item is not processing")
+
+    item.status = "sent"
+    item.wa_message_id = wa_message_id
+    item.sent_at = datetime.now().astimezone()
+    item.last_error = None
+    db.add(
+        ComplaintEvent(
+            complaint_id=item.complaint_id,
+            event_type="whatsapp_number_sent",
+            actor="whatsapp-bridge",
+            details={"outbox_id": item.id, "wa_message_id": wa_message_id},
+        )
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/internal/whatsapp/outbox/{item_id}/failed", dependencies=[Depends(verify_bridge_token)])
+def mark_whatsapp_outbox_failed(
+    item_id: int,
+    error: str = Form(...),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    item = db.get(WhatsAppOutbox, item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outbox item not found")
+    if item.status != "processing":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Outbox item is not processing")
+
+    item.status = "failed"
+    item.last_error = error[:1000]
+    db.add(
+        ComplaintEvent(
+            complaint_id=item.complaint_id,
+            event_type="whatsapp_number_failed",
+            actor="whatsapp-bridge",
+            details={"outbox_id": item.id, "error": item.last_error},
+        )
+    )
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/api/internal/whatsapp/messages", dependencies=[Depends(verify_bridge_token)])

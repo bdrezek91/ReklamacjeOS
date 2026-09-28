@@ -46,6 +46,8 @@ const client = new Client({
 
 const processing = new Set();
 let whatsappReady = false;
+let outboxPolling = false;
+let outboxTimer = null;
 
 function log(message, metadata = {}) {
   const safe = { ...metadata };
@@ -120,6 +122,14 @@ function fileNameFor(media, messageId) {
 async function forwardMessage(message) {
   const messageId = message.id?._serialized;
   if (!messageId || processing.has(messageId)) return;
+  if (
+    message.fromMe &&
+    /^Przyjęto reklamację nr R\/\d+\/\d{2}\/\d{4}\. Proszę opisać reklamowane płyty: reklamacja nr R\/\d+\/\d{2}\/\d{4}\.$/.test(
+      message.body || "",
+    )
+  ) {
+    return;
+  }
   processing.add(messageId);
 
   try {
@@ -191,6 +201,57 @@ async function forwardMessage(message) {
   }
 }
 
+async function reportOutboxResult(itemId, result, data) {
+  const form = new URLSearchParams(data);
+  await axios.post(`${config.backendUrl}/api/internal/whatsapp/outbox/${itemId}/${result}`, form, {
+    headers: { Authorization: `Bearer ${config.token}` },
+    timeout: 15000,
+  });
+}
+
+async function pollOutbox() {
+  if (!whatsappReady || outboxPolling || !config.groupId) return;
+  outboxPolling = true;
+  let item = null;
+  try {
+    const response = await axios.post(`${config.backendUrl}/api/internal/whatsapp/outbox/claim`, null, {
+      headers: { Authorization: `Bearer ${config.token}` },
+      timeout: 15000,
+      validateStatus: (status) => status === 200 || status === 204,
+    });
+    if (response.status === 204) return;
+    item = response.data;
+
+    let sentMessage;
+    try {
+      sentMessage = await client.sendMessage(item.group_id, item.body);
+    } catch (sendError) {
+      log("Nie udało się wysłać numeru reklamacji", { outboxId: item.id, error: sendError.message });
+      await reportOutboxResult(item.id, "failed", { error: sendError.message }).catch((reportError) => {
+        log("Nie udało się zapisać błędu wysyłki", { outboxId: item.id, error: reportError.message });
+      });
+      return;
+    }
+
+    const waMessageId = sentMessage.id?._serialized;
+    if (!waMessageId) throw new Error("WhatsApp nie zwrócił ID wysłanej wiadomości");
+    try {
+      await reportOutboxResult(item.id, "sent", { wa_message_id: waMessageId });
+      log("Wysłano numer reklamacji na grupę", { outboxId: item.id, messageId: waMessageId });
+    } catch (reportError) {
+      log("Numer wysłany, ale nie zapisano potwierdzenia; wymagane sprawdzenie ręczne", {
+        outboxId: item.id,
+        messageId: waMessageId,
+        error: reportError.message,
+      });
+    }
+  } catch (error) {
+    log("Błąd obsługi kolejki numerów reklamacji", { outboxId: item?.id, error: error.message });
+  } finally {
+    outboxPolling = false;
+  }
+}
+
 client.on("qr", (qr) => {
   console.log("\nZeskanuj QR w WhatsApp: Ustawienia -> Połączone urządzenia -> Połącz urządzenie\n");
   qrcode.generate(qr, { small: true });
@@ -207,8 +268,10 @@ client.on("disconnected", (reason) => {
 });
 client.on("ready", async () => {
   whatsappReady = true;
-  log("WhatsApp bridge gotowy (tryb wyłącznie pasywny)");
+  log("WhatsApp bridge gotowy");
   await printGroups().catch((error) => log("Nie udało się pobrać grup", { error: error.message }));
+  await pollOutbox();
+  outboxTimer = setInterval(pollOutbox, 5000);
 });
 
 // `message` covers incoming messages; `message_create` also covers messages sent by
@@ -218,6 +281,7 @@ client.on("message_create", forwardMessage);
 
 process.on("SIGTERM", async () => {
   whatsappReady = false;
+  if (outboxTimer) clearInterval(outboxTimer);
   log("Zamykanie bridge");
   healthServer.close();
   await client.destroy();

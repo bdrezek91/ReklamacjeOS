@@ -25,6 +25,7 @@ from .db import Base
 class ComplaintStatus(str, enum.Enum):
     DRAFT = "draft"
     PENDING_APPROVAL = "pending_approval"
+    ACCEPTED = "accepted"
     SENT = "sent"
     CLOSED = "closed"
 
@@ -33,6 +34,14 @@ class ComplaintNumberCounter(Base):
     __tablename__ = "complaint_number_counters"
 
     year: Mapped[int] = mapped_column(primary_key=True)
+    next_value: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class ComplaintMonthlyNumberCounter(Base):
+    __tablename__ = "complaint_monthly_number_counters"
+
+    year: Mapped[int] = mapped_column(primary_key=True)
+    month: Mapped[int] = mapped_column(primary_key=True)
     next_value: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
@@ -123,6 +132,24 @@ class ComplaintField(Base):
     confidence: Mapped[int | None] = mapped_column(Integer)
     is_uncertain: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WhatsAppOutbox(Base):
+    __tablename__ = "whatsapp_outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    complaint_id: Mapped[int] = mapped_column(
+        ForeignKey("complaints.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    group_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    wa_message_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EmailDraft(Base):

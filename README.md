@@ -1,8 +1,8 @@
 # ReklamacjeOS
 
-Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 3**: pasywny odczyt jednej grupy WhatsApp, deterministyczne grupowanie źródeł oraz pełna karta reklamacji z numerem nadawanym przy jej utworzeniu.
+Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap 3**: odczyt jednej grupy WhatsApp, deterministyczne grupowanie źródeł oraz pełna karta reklamacji z numerem nadawanym po ręcznej akceptacji.
 
-> `whatsapp-web.js` nie jest oficjalnym API Meta. Zmiany po stronie WhatsApp mogą wymagać aktualizacji bridge'a, a używanie nieoficjalnego klienta wiąże się z ryzykiem wylogowania lub ograniczenia konta. V1 nie zawiera żadnego kodu wysyłającego wiadomości na WhatsApp.
+> `whatsapp-web.js` nie jest oficjalnym API Meta. Zmiany po stronie WhatsApp mogą wymagać aktualizacji bridge'a, a używanie nieoficjalnego klienta wiąże się z ryzykiem wylogowania lub ograniczenia konta.
 
 ## Co działa
 
@@ -17,8 +17,9 @@ Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap
 - automatyczne drafty `DRAFT-xxxx`: cytowana wiadomość ma pierwszeństwo, a pozostałe wpisy tego samego autora są łączone w konfigurowalnym oknie czasu,
 - ręczne rozdzielanie wiadomości do nowego draftu i nieusuwające scalanie draftów,
 - dziennik utworzenia, przypisania, rozdzielenia i scalenia,
-- roczna numeracja `REK-YYYY-xxxx` nadawana od razu po utworzeniu reklamacji,
+- miesięczna numeracja `R/nn/MM/YYYY` nadawana dopiero po ręcznej akceptacji,
 - edytowalna karta reklamacji, wybór zdjęć i przejście do statusu „Do akceptacji”,
+- wysyłka numeru na grupę WhatsApp z prośbą o oznaczenie reklamowanych płyt,
 - Caddy z obowiązkowym HTTP Basic Auth,
 - migracje Alembic i schemat przygotowany pod reklamacje, audyt, dane AI oraz przyszłe maile.
 
@@ -26,9 +27,9 @@ Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap
 
 ```text
 WhatsApp Web (LocalAuth)
-        │ tylko odczyt
+        │ odczyt grupy i wysyłka numeru po akceptacji
         ▼
-Node.js bridge ── Bearer token ──► FastAPI ──► PostgreSQL
+Node.js bridge ◄── Bearer token ──► FastAPI ──► PostgreSQL
                                       │
                                       └──────► /data/reklamacje (oryginały)
 
@@ -109,7 +110,7 @@ Każda nowa wiadomość otrzymuje draft w tej samej transakcji co zapis źródł
 2. W przeciwnym razie trafia do ostatniego aktywnego draftu tego samego autora i grupy, jeżeli mieści się w `GROUPING_WINDOW_MINUTES`.
 3. Jeżeli żadna reguła nie pasuje, powstaje kolejny `DRAFT-xxxx`.
 
-W tym samym momencie system nadaje niezmienny numer `REK-YYYY-xxxx`. Licznik jest osobny dla każdego roku i chroniony blokadą transakcyjną. Ręczne rozdzielenie tworzy nową reklamację z nowym numerem, a scalenie zachowuje oba numery w historii i pozostawia aktywny numer reklamacji docelowej.
+Draft nie ma numeru reklamacji. Po przejściu do statusu „Do akceptacji” operator klika „Akceptuj i wyślij numer”. System atomowo nadaje numer `R/nn/MM/YYYY`, zmienia status i zapisuje komunikat w kolejce. Licznik zaczyna się od `01` w każdym miesiącu i jest chroniony blokadą transakcyjną. Bridge wysyła na grupę prośbę o oznaczenie reklamowanych płyt tym numerem, a własnego komunikatu nie zapisuje ponownie jako zgłoszenia.
 
 Operacje ręczne wymagają `PANEL_ACTION_TOKEN`. Rozdzielenie przenosi wybrane wiadomości do nowego draftu. Scalenie przenosi wszystkie wiadomości do draftu docelowego, zachowuje rekord źródłowego draftu i zapisuje zdarzenia audytowe po obu stronach.
 
@@ -149,6 +150,6 @@ Testy backendu obejmują odrzucenie obcej grupy, idempotencję wiadomości i zap
 ## Zakres kolejnych etapów
 
 - **Etap 2:** deterministyczne grupowanie wiadomości i zdjęć w `DRAFT-xxxx`, ręczne łączenie i rozdzielanie.
-- **Etap 3 (aktualny):** pełna karta reklamacji, galeria, historia zmian i numeracja `REK-YYYY-xxxx` przy utworzeniu reklamacji.
+- **Etap 3 (aktualny):** pełna karta reklamacji, galeria, historia zmian, numeracja `R/nn/MM/YYYY` i powiadomienie WhatsApp po akceptacji.
 - **Etap 4:** AI/Vision/OCR z rozdzieleniem source data, AI interpretation i approved data.
 - **Etap 5:** edytowalny mail, ręczne „AKCEPTUJ I WYŚLIJ” oraz wysyłka SMTP. Bez IMAP.

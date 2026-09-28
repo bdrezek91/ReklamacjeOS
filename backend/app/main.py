@@ -11,8 +11,13 @@ from sqlalchemy.orm import Session, selectinload
 from .api import router as api_router
 from .config import settings
 from .db import get_db
-from .models import Attachment, Complaint, ComplaintStatus, WhatsAppMessage
-from .services.complaints import change_complaint_status, update_complaint_card
+from .models import Attachment, Complaint, ComplaintStatus, WhatsAppMessage, WhatsAppOutbox
+from .services.complaints import (
+    accept_complaint,
+    change_complaint_status,
+    retry_whatsapp_notification,
+    update_complaint_card,
+)
 from .services.grouping import DraftOperationError, merge_drafts, split_draft
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -50,6 +55,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
             "attachment_count": attachment_count,
             "draft_count": status_counts.get(ComplaintStatus.DRAFT, 0),
             "pending_count": status_counts.get(ComplaintStatus.PENDING_APPROVAL, 0),
+            "accepted_count": status_counts.get(ComplaintStatus.ACCEPTED, 0),
             "sent_count": status_counts.get(ComplaintStatus.SENT, 0),
         },
     )
@@ -75,6 +81,7 @@ def complaints_by_status(status_name: str, request: Request, db: Session = Depen
     mappings = {
         "drafts": (ComplaintStatus.DRAFT, "Drafty"),
         "pending": (ComplaintStatus.PENDING_APPROVAL, "Do akceptacji"),
+        "accepted": (ComplaintStatus.ACCEPTED, "Zaakceptowane"),
         "sent": (ComplaintStatus.SENT, "Wysłane"),
         "closed": (ComplaintStatus.CLOSED, "Zamknięte"),
     }
@@ -119,11 +126,18 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     events = sorted(complaint.events, key=lambda event: (event.created_at, event.id), reverse=True)
     attachment_count = sum(len(message.attachments) for message in messages)
     attachments = [attachment for message in messages for attachment in message.attachments]
+    outbox = db.scalar(select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id))
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
         context={
-            "active": "drafts",
+            "active": {
+                ComplaintStatus.DRAFT: "drafts",
+                ComplaintStatus.PENDING_APPROVAL: "pending",
+                ComplaintStatus.ACCEPTED: "accepted",
+                ComplaintStatus.SENT: "sent",
+                ComplaintStatus.CLOSED: "closed",
+            }[complaint.status],
             "complaint": complaint,
             "messages": messages,
             "events": events,
@@ -134,6 +148,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "status_label": {
                 ComplaintStatus.DRAFT: "Draft",
                 ComplaintStatus.PENDING_APPROVAL: "Do akceptacji",
+                ComplaintStatus.ACCEPTED: "Zaakceptowana",
                 ComplaintStatus.SENT: "Wysłana",
                 ComplaintStatus.CLOSED: "Zamknięta",
             }[complaint.status],
@@ -147,6 +162,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
                 ("notes", "Uwagi"),
             ),
             "panel_action_token": settings.panel_action_token,
+            "outbox": outbox,
         },
     )
 
@@ -221,6 +237,47 @@ def change_complaint_status_action(
         change_complaint_status(db, complaint_id, parsed_status, actor="panel")
         db.commit()
     except (DraftOperationError, ValueError) as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/drafts/{complaint_id}/accept")
+def accept_complaint_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        accept_complaint(
+            db,
+            complaint_id,
+            actor="panel",
+            group_id=settings.whatsapp_group_id,
+        )
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(
+        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/drafts/{complaint_id}/retry-whatsapp")
+def retry_whatsapp_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        retry_whatsapp_notification(db, complaint_id, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     return RedirectResponse(

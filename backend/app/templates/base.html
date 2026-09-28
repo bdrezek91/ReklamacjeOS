@@ -9,7 +9,7 @@
 <body>
   <header class="topbar">
     <a class="brand" href="{{ root_path }}/">Reklamacje<span>OS</span></a>
-    <span class="environment">Etap 2 · grupowanie</span>
+    <span class="environment">Etap 3 · akceptacja</span>
   </header>
   <div class="layout">
     <nav class="sidebar" aria-label="Główna nawigacja">
@@ -17,6 +17,7 @@
       <a class="{{ 'active' if active == 'inbox' else '' }}" href="{{ root_path }}/inbox">Nowe z WhatsApp</a>
       <a class="{{ 'active' if active == 'drafts' else '' }}" href="{{ root_path }}/complaints/drafts">Drafty</a>
       <a class="{{ 'active' if active == 'pending' else '' }}" href="{{ root_path }}/complaints/pending">Do akceptacji</a>
+      <a class="{{ 'active' if active == 'accepted' else '' }}" href="{{ root_path }}/complaints/accepted">Zaakceptowane</a>
       <a class="{{ 'active' if active == 'sent' else '' }}" href="{{ root_path }}/complaints/sent">Wysłane</a>
       <a class="{{ 'active' if active == 'closed' else '' }}" href="{{ root_path }}/complaints/closed">Zamknięte</a>
     </nav>

@@ -22,14 +22,13 @@
     <section class="panel complaint-card-form">
       <div class="section-heading">
         <div><p class="eyebrow">Dane zatwierdzone</p><h2>Karta reklamacji</h2></div>
-        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/status">
+        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/{{ 'accept' if complaint.status.value == 'pending_approval' else 'status' }}" {% if complaint.status.value == 'pending_approval' %}onsubmit="return confirm('Zaakceptować reklamację, nadać numer i wysłać go na grupę WhatsApp?')"{% endif %}>
           <input type="hidden" name="action_token" value="{{ panel_action_token }}">
           {% if complaint.status.value == 'draft' %}
             <input type="hidden" name="target_status" value="pending_approval">
             <button class="button secondary" type="submit">Przekaż do akceptacji</button>
           {% elif complaint.status.value == 'pending_approval' %}
-            <input type="hidden" name="target_status" value="draft">
-            <button class="button secondary" type="submit">Cofnij do draftu</button>
+            <button class="button" type="submit">Akceptuj i wyślij numer</button>
           {% endif %}
         </form>
       </div>
@@ -39,9 +38,9 @@
           {% for field_name, label in card_fields %}
             <label class="{{ 'wide' if field_name in ['defect_description', 'notes'] else '' }}">{{ label }}
               {% if field_name in ['defect_description', 'notes'] %}
-                <textarea name="{{ field_name }}" rows="4">{{ card_data.get(field_name, '') }}</textarea>
+                <textarea name="{{ field_name }}" rows="4" {% if complaint.status.value not in ['draft', 'pending_approval'] %}disabled{% endif %}>{{ card_data.get(field_name, '') }}</textarea>
               {% else %}
-                <input name="{{ field_name }}" value="{{ card_data.get(field_name, '') }}">
+                <input name="{{ field_name }}" value="{{ card_data.get(field_name, '') }}" {% if complaint.status.value not in ['draft', 'pending_approval'] %}disabled{% endif %}>
               {% endif %}
             </label>
           {% endfor %}
@@ -52,14 +51,34 @@
             {% for attachment in attachments %}
               <label>
                 <img src="{{ root_path }}/media/{{ attachment.id }}" alt="{{ attachment.original_filename }}" loading="lazy">
-                <span><input type="checkbox" name="attachment_ids" value="{{ attachment.id }}" {% if attachment.include_in_email %}checked{% endif %}> Uwzględnij zdjęcie</span>
+                <span><input type="checkbox" name="attachment_ids" value="{{ attachment.id }}" {% if attachment.include_in_email %}checked{% endif %} {% if complaint.status.value not in ['draft', 'pending_approval'] %}disabled{% endif %}> Uwzględnij zdjęcie</span>
               </label>
             {% endfor %}
           </div>
         {% endif %}
-        <button class="button" type="submit">Zapisz kartę</button>
+        {% if complaint.status.value in ['draft', 'pending_approval'] %}<button class="button" type="submit">Zapisz kartę</button>{% endif %}
       </form>
     </section>
+
+    {% if complaint.status.value == 'pending_approval' %}
+      <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/status">
+        <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+        <input type="hidden" name="target_status" value="draft">
+        <button class="button secondary" type="submit">Cofnij do draftu</button>
+      </form>
+    {% endif %}
+
+    {% if outbox %}
+      <section class="notice {{ 'success' if outbox.status == 'sent' else 'warning' }}">
+        WhatsApp: {% if outbox.status == 'sent' %}numer wysłany na grupę{% elif outbox.status == 'failed' %}wysyłka nieudana{% elif outbox.status == 'processing' %}wysyłanie numeru{% else %}numer oczekuje na wysłanie{% endif %}.
+        {% if outbox.status == 'failed' %}
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/retry-whatsapp">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="button secondary" type="submit">Ponów wysyłkę</button>
+          </form>
+        {% endif %}
+      </section>
+    {% endif %}
 
     {% if complaint.status.value == 'draft' %}
     <section class="panel draft-actions">

@@ -1,6 +1,8 @@
 from collections.abc import Iterable, Mapping
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -8,8 +10,10 @@ from ..models import (
     Complaint,
     ComplaintEvent,
     ComplaintField,
+    ComplaintMonthlyNumberCounter,
     ComplaintStatus,
     WhatsAppMessage,
+    WhatsAppOutbox,
 )
 from .grouping import DraftOperationError
 
@@ -22,6 +26,8 @@ CARD_FIELDS = (
     "customer_project",
     "notes",
 )
+
+WARSAW = ZoneInfo("Europe/Warsaw")
 
 
 def _editable_complaint(db: Session, complaint_id: int) -> Complaint:
@@ -121,3 +127,90 @@ def change_complaint_status(
         )
     )
     return complaint
+
+
+def allocate_monthly_number(db: Session, *, year: int, month: int) -> str:
+    if db.get_bind().dialect.name == "postgresql":
+        lock_key = 732_000_000 + year * 100 + month
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+    counter = db.get(ComplaintMonthlyNumberCounter, (year, month))
+    if counter is None:
+        sequence = 1
+        db.add(ComplaintMonthlyNumberCounter(year=year, month=month, next_value=2))
+    else:
+        sequence = counter.next_value
+        counter.next_value += 1
+    db.flush()
+    return f"R/{sequence:02d}/{month:02d}/{year}"
+
+
+def accept_complaint(
+    db: Session,
+    complaint_id: int,
+    *,
+    actor: str,
+    group_id: str,
+    accepted_at: datetime | None = None,
+) -> Complaint:
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None:
+        raise DraftOperationError("Reklamacja nie istnieje")
+    if complaint.merged_into_id is not None:
+        raise DraftOperationError("Scalona reklamacja nie może być zaakceptowana")
+    if complaint.status != ComplaintStatus.PENDING_APPROVAL:
+        raise DraftOperationError("Do akceptacji można przekazać tylko reklamację w statusie „Do akceptacji”")
+    if complaint.official_number is not None:
+        raise DraftOperationError("Reklamacja ma już numer")
+    if not group_id:
+        raise DraftOperationError("Grupa WhatsApp nie jest skonfigurowana")
+
+    local_time = accepted_at or datetime.now(WARSAW)
+    official_number = allocate_monthly_number(db, year=local_time.year, month=local_time.month)
+    body = (
+        f"Przyjęto reklamację nr {official_number}. "
+        f"Proszę opisać reklamowane płyty: reklamacja nr {official_number}."
+    )
+
+    complaint.official_number = official_number
+    complaint.status = ComplaintStatus.ACCEPTED
+    complaint.updated_at = func.now()
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint.id,
+            event_type="complaint_accepted",
+            actor=actor,
+            details={"official_number": official_number},
+        )
+    )
+    db.add(
+        WhatsAppOutbox(
+            complaint_id=complaint.id,
+            group_id=group_id,
+            body=body,
+            status="pending",
+        )
+    )
+    db.flush()
+    return complaint
+
+
+def retry_whatsapp_notification(db: Session, complaint_id: int, *, actor: str) -> WhatsAppOutbox:
+    item = db.scalar(select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint_id))
+    if item is None:
+        raise DraftOperationError("Brak komunikatu WhatsApp dla tej reklamacji")
+    if item.status != "failed":
+        raise DraftOperationError("Ponowić można tylko nieudaną wysyłkę")
+
+    item.status = "pending"
+    item.last_error = None
+    item.claimed_at = None
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint_id,
+            event_type="whatsapp_number_retry_requested",
+            actor=actor,
+            details={"outbox_id": item.id},
+        )
+    )
+    return item

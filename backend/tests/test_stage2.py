@@ -2,7 +2,16 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.models import Attachment, Complaint, ComplaintEvent, ComplaintField, ComplaintStatus, WhatsAppMessage
+from app.models import (
+    Attachment,
+    Complaint,
+    ComplaintEvent,
+    ComplaintField,
+    ComplaintStatus,
+    WhatsAppMessage,
+    WhatsAppOutbox,
+)
+from app.services.complaints import allocate_monthly_number
 
 from .test_ingest import make_client, payload
 
@@ -46,9 +55,9 @@ def test_groups_by_author_window_and_quoted_message(tmp_path):
 
     assert first.json()["complaint_id"] == close.json()["complaint_id"]
     assert len(first.json()["draft_number"]) <= 32
-    assert first.json()["official_number"] == "REK-2026-0001"
+    assert first.json()["official_number"] is None
     assert late.json()["complaint_id"] != first.json()["complaint_id"]
-    assert late.json()["official_number"] == "REK-2026-0002"
+    assert late.json()["official_number"] is None
     assert quoted.json()["complaint_id"] == first.json()["complaint_id"]
     assert quoted.json()["grouping_rule"] == "quoted_message"
     assert len(session.scalars(select(Complaint)).all()) == 2
@@ -60,15 +69,9 @@ def test_groups_by_author_window_and_quoted_message(tmp_path):
     assert draft_detail.status_code == 200
     assert "panel-test-token" in draft_detail.text
 
-    next_year = client.post(
-        "/api/internal/whatsapp/messages",
-        data=payload(
-            wa_message_id="next-year",
-            source_timestamp=datetime(2027, 1, 2, tzinfo=timezone.utc).isoformat(),
-        ),
-        headers=headers,
-    )
-    assert next_year.json()["official_number"] == "REK-2027-0001"
+    assert allocate_monthly_number(session, year=2027, month=1) == "R/01/01/2027"
+    assert allocate_monthly_number(session, year=2027, month=1) == "R/02/01/2027"
+    assert allocate_monthly_number(session, year=2027, month=2) == "R/01/02/2027"
 
 
 def test_manual_split_and_merge_preserve_messages_and_audit(tmp_path):
@@ -100,7 +103,7 @@ def test_manual_split_and_merge_preserve_messages_and_audit(tmp_path):
     active = session.scalars(select(Complaint).where(Complaint.merged_into_id.is_(None))).all()
     assert len(active) == 2
     target = next(complaint for complaint in active if complaint.id != source_id)
-    assert target.official_number == "REK-2026-0002"
+    assert target.official_number is None
     assert session.get(WhatsAppMessage, messages[-1].id).complaint_id == target.id
 
     merge = client.post(
@@ -165,12 +168,64 @@ def test_updates_card_gallery_and_status_with_audit(tmp_path):
     )
     assert status_update.status_code == 303
 
+    accept = client.post(
+        f"/drafts/{complaint_id}/accept",
+        data={"action_token": "panel-test-token"},
+        follow_redirects=False,
+    )
+    assert accept.status_code == 303
+
     session.expire_all()
     complaint = session.get(Complaint, complaint_id)
-    assert complaint.official_number == "REK-2026-0001"
+    assert complaint.official_number == "R/01/09/2026"
     assert complaint.approved_data["supplier"] == "Dostawca A"
-    assert complaint.status == ComplaintStatus.PENDING_APPROVAL
+    assert complaint.status == ComplaintStatus.ACCEPTED
     assert session.get(Attachment, attachment.id).include_in_email is True
     assert len(session.scalars(select(ComplaintField)).all()) == 7
     event_types = set(session.scalars(select(ComplaintEvent.event_type)).all())
-    assert {"official_number_assigned", "complaint_card_updated", "status_changed"} <= event_types
+    assert {"complaint_accepted", "complaint_card_updated", "status_changed"} <= event_types
+
+    outbox = session.scalar(select(WhatsAppOutbox))
+    assert outbox.status == "pending"
+    assert outbox.body == (
+        "Przyjęto reklamację nr R/01/09/2026. "
+        "Proszę opisać reklamowane płyty: reklamacja nr R/01/09/2026."
+    )
+
+    claimed = client.post(
+        "/api/internal/whatsapp/outbox/claim",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert claimed.status_code == 200
+    assert claimed.json()["id"] == outbox.id
+
+    failed = client.post(
+        f"/api/internal/whatsapp/outbox/{outbox.id}/failed",
+        data={"error": "temporary send failure"},
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert failed.status_code == 200
+    retry = client.post(
+        f"/drafts/{complaint_id}/retry-whatsapp",
+        data={"action_token": "panel-test-token"},
+        follow_redirects=False,
+    )
+    assert retry.status_code == 303
+    claimed_again = client.post(
+        "/api/internal/whatsapp/outbox/claim",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert claimed_again.status_code == 200
+
+    sent = client.post(
+        f"/api/internal/whatsapp/outbox/{outbox.id}/sent",
+        data={"wa_message_id": "sent-number-message"},
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert sent.status_code == 200
+    session.expire_all()
+    assert session.get(WhatsAppOutbox, outbox.id).status == "sent"
+    assert client.post(
+        "/api/internal/whatsapp/outbox/claim",
+        headers={"Authorization": "Bearer test-token"},
+    ).status_code == 204

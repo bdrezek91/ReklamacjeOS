@@ -2,7 +2,7 @@
   "name": "reklamacje-os-whatsapp-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Read-only WhatsApp source bridge for ReklamacjeOS",
+  "description": "WhatsApp source and complaint-number notification bridge for ReklamacjeOS",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
