@@ -48,6 +48,9 @@ class Settings:
     typesafe_api_key: str = read_secret("TYPESAFE_API_KEY", "TYPESAFE_API_KEY_FILE")
     typesafe_model: str = os.getenv("TYPESAFE_MODEL", "jev-latest").strip()
     typesafe_timeout_seconds: int = int(os.getenv("TYPESAFE_TIMEOUT_SECONDS", "15"))
+    ocr_language: str = os.getenv("OCR_LANGUAGE", "pol+eng").strip()
+    ocr_timeout_seconds: int = int(os.getenv("OCR_TIMEOUT_SECONDS", "90"))
+    ocr_worker_interval_seconds: int = int(os.getenv("OCR_WORKER_INTERVAL_SECONDS", "3"))
 
     @property
     def smtp_configured(self) -> bool:

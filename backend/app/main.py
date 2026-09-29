@@ -43,6 +43,7 @@ from .services.correspondence import (
 )
 from .services.grouping import DraftOperationError, merge_drafts, split_draft
 from .services.jev import analyze_complaint_with_jev, answer_rows
+from .services.ocr import SUPPORTED_IMAGE_TYPES, queue_complaint_ocr, save_corrected_ocr_text
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -159,7 +160,9 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     complaint = db.scalar(
         select(Complaint)
         .options(
-            selectinload(Complaint.messages).selectinload(WhatsAppMessage.attachments),
+            selectinload(Complaint.messages)
+            .selectinload(WhatsAppMessage.attachments)
+            .selectinload(Attachment.ocr_result),
             selectinload(Complaint.events),
             selectinload(Complaint.merged_into),
             selectinload(Complaint.supplier),
@@ -183,6 +186,13 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     events = sorted(complaint.events, key=lambda event: (event.created_at, event.id), reverse=True)
     attachment_count = sum(len(message.attachments) for message in messages)
     attachments = [attachment for message in messages for attachment in message.attachments]
+    ocr_results = {attachment.id: attachment.ocr_result for attachment in attachments if attachment.ocr_result}
+    ocr_eligible_count = sum(attachment.mime_type in SUPPORTED_IMAGE_TYPES for attachment in attachments)
+    ocr_queueable_count = sum(
+        attachment.mime_type in SUPPORTED_IMAGE_TYPES
+        and (attachment.ocr_result is None or attachment.ocr_result.status == "failed")
+        for attachment in attachments
+    )
     outboxes = db.scalars(
         select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id).order_by(WhatsAppOutbox.id)
     ).all()
@@ -210,6 +220,9 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "targets": targets,
             "attachment_count": attachment_count,
             "attachments": attachments,
+            "ocr_results": ocr_results,
+            "ocr_eligible_count": ocr_eligible_count,
+            "ocr_queueable_count": ocr_queueable_count,
             "card_data": complaint.approved_data or {},
             "status_label": {
                 ComplaintStatus.DRAFT: "Draft",
@@ -256,6 +269,46 @@ def analyze_jev_action(
         )
     try:
         analyze_complaint_with_jev(db, complaint_id)
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/ocr")
+def queue_ocr_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        queue_complaint_ocr(db, complaint_id, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/ocr/{attachment_id}")
+def save_ocr_action(
+    complaint_id: int,
+    attachment_id: int,
+    corrected_text: str = Form(...),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        save_corrected_ocr_text(
+            db,
+            complaint_id,
+            attachment_id,
+            corrected_text,
+            actor="panel",
+        )
         db.commit()
     except DraftOperationError as error:
         db.rollback()

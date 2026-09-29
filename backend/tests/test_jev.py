@@ -1,4 +1,6 @@
-from app.models import Complaint, ComplaintEvent, ComplaintStatus
+from sqlalchemy import select
+
+from app.models import Attachment, Complaint, ComplaintEvent, ComplaintStatus, OcrResult
 from app.services.jev import analyze_complaint_with_jev
 
 from .test_ingest import make_client, payload
@@ -40,11 +42,23 @@ def test_jev_analysis_records_typed_results_without_changing_complaint(tmp_path)
     response = client.post(
         "/api/internal/whatsapp/messages",
         data=payload(body="Płyta jest uszkodzona, ilość 4 sztuki"),
+        files={"media": ("etykieta.jpg", b"fake-image", "image/jpeg")},
         headers={"Authorization": "Bearer test-token"},
     )
     complaint_id = response.json()["complaint_id"]
     complaint = session.get(Complaint, complaint_id)
     original_status = complaint.status
+    attachment = session.scalar(select(Attachment))
+    session.add(
+        OcrResult(
+            attachment_id=attachment.id,
+            status="completed",
+            raw_text="niepoprawny odczyt",
+            corrected_text="Panel ZS-3128, 4 sztuki",
+            confidence=88.5,
+        )
+    )
+    session.commit()
     fake_client = FakeClient()
 
     assessment = analyze_complaint_with_jev(session, complaint_id, client=fake_client)
@@ -59,6 +73,14 @@ def test_jev_analysis_records_typed_results_without_changing_complaint(tmp_path)
     assert fake_client.state["messages"][0]["body"] == "Płyta jest uszkodzona, ilość 4 sztuki"
     assert "group_id" not in fake_client.state["messages"][0]
     assert "author_id" not in fake_client.state["messages"][0]
+    assert fake_client.state["ocr"] == [
+        {
+            "attachment_id": attachment.id,
+            "text": "Panel ZS-3128, 4 sztuki",
+            "confidence": 88.5,
+            "reviewed": False,
+        }
+    ]
     assert "needs_human_review" in fake_client.questions
     assert any(event.event_type == "jev_analysis_completed" for event in session.query(ComplaintEvent).all())
 

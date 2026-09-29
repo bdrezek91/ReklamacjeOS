@@ -13,6 +13,7 @@ Panel do obsługi reklamacji materiałów z produkcji. Aktualny zakres to **Etap
 - tekst, autor, oryginalny czas, ID wiadomości, reply/quoted ID i obrazy,
 - idempotencja przez unikalne `wa_message_id`,
 - oryginalne obrazy na dysku i metadane w PostgreSQL,
+- lokalny OCR zdjęć przez Tesseract (`pol+eng`), kolejka w osobnym workerze, confidence i ręczna korekta,
 - prosty panel z Dashboardem i chronologicznym inboxem,
 - automatyczne drafty `DRAFT-xxxx`: cytowana wiadomość ma pierwszeństwo, a pozostałe wpisy tego samego autora są łączone w konfigurowalnym oknie czasu,
 - ręczne rozdzielanie wiadomości do nowego draftu i nieusuwające scalanie draftów,
@@ -38,7 +39,8 @@ WhatsApp Web (LocalAuth)
         ▼
 Node.js bridge ◄── Bearer token ──► FastAPI ──► PostgreSQL
                                       │
-                                      └──────► /data/reklamacje (oryginały)
+                                      ├──────► /data/reklamacje (oryginały)
+                                      └──────► OCR worker (Tesseract, lokalnie)
 
 Przeglądarka ── Basic Auth ──► Caddy ──► FastAPI/Jinja
 ```
@@ -111,7 +113,11 @@ Backend zapisuje zatwierdzoną wiadomość i listę załączników w trwałej ko
 
 Jev działa wyłącznie jako ręcznie uruchamiana analiza wspomagająca. Ocenia, czy treść opisuje reklamację, spójność wiadomości, pilność, jakość dowodów oraz dostępność danych wymaganych w karcie. Wyniki wraz z prawdopodobieństwami, confidence, wersją modelu i hashem wejścia są zapisywane w bazie. Jev nie zmienia danych zatwierdzonych, statusu, numeracji, dostawcy ani kolejek wysyłkowych.
 
-Klucz przechowuj w ignorowanym pliku `.secrets/typesafe_api_key`. Skrypt `ops/set-typesafe-api-key.sh` zapisuje go z ograniczonymi uprawnieniami, wypisuje GID właściciela pliku i nie modyfikuje `.env`. Ustaw ten GID jako `TYPESAFE_SECRET_GID`; `TYPESAFE_ENABLED` pozostaw `false` do zakończenia wdrożenia. Po weryfikacji konfiguracji włącz integrację osobną zmianą `TYPESAFE_ENABLED=true` i odtwórz wyłącznie backend. Do Jev trafia tekst wiadomości oraz w przyszłości tekst uzyskany przez OCR; surowe zdjęcia nie są wysyłane do Jev.
+Klucz przechowuj w ignorowanym pliku `.secrets/typesafe_api_key`. Skrypt `ops/set-typesafe-api-key.sh` zapisuje go z ograniczonymi uprawnieniami, wypisuje GID właściciela pliku i nie modyfikuje `.env`. Ustaw ten GID jako `TYPESAFE_SECRET_GID`; `TYPESAFE_ENABLED` pozostaw `false` do zakończenia wdrożenia. Po weryfikacji konfiguracji włącz integrację osobną zmianą `TYPESAFE_ENABLED=true` i odtwórz wyłącznie backend. Do Jev trafia tekst wiadomości oraz tekst uzyskany przez OCR; surowe zdjęcia nie są wysyłane do Jev.
+
+### Lokalny OCR
+
+Na karcie reklamacji operator ręcznie zleca OCR obsługiwanych zdjęć. Osobny `ocr-worker` uruchamia Tesseract z językami polskim i angielskim oraz trybem przeznaczonym dla rozproszonego tekstu na fotografiach. Wynik, confidence i ewentualna ręczna korekta są zapisywane w PostgreSQL. Oryginalne zdjęcie pozostaje w wolumenie ReklamacjeOS i nie jest wysyłane do TypeSafe; kolejna ręczna analiza Jev otrzymuje wyłącznie tekst OCR. OCR nie uzupełnia ani nie zatwierdza automatycznie karty reklamacji.
 
 ## Dane i kopie zapasowe
 

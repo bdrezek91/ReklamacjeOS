@@ -60,6 +60,43 @@
       </form>
     </section>
 
+    {% if ocr_eligible_count %}
+      <section class="panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">Lokalne rozpoznawanie zdjęć</p><h2>OCR</h2></div>
+          {% if ocr_queueable_count %}
+            <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/ocr">
+              <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+              <button class="button secondary" type="submit">Uruchom OCR zdjęć</button>
+            </form>
+          {% endif %}
+        </div>
+        <p class="muted">Zdjęcia są analizowane lokalnie na VPS. Do Jev może trafić wyłącznie zapisany poniżej tekst.</p>
+        {% for attachment in attachments %}
+          {% if attachment.mime_type in ['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/bmp'] %}
+            {% set result = ocr_results.get(attachment.id) %}
+            <div class="ocr-result">
+              <p><strong>{{ attachment.original_filename }}</strong>
+                {% if not result %}· OCR nieuruchomiony
+                {% elif result.status == 'pending' %}· oczekuje w kolejce
+                {% elif result.status == 'processing' %}· trwa rozpoznawanie
+                {% elif result.status == 'failed' %}· OCR nie powiódł się
+                {% elif result.confidence is not none %}· pewność {{ '%.0f'|format(result.confidence) }}%{% endif %}
+              </p>
+              {% if result and result.status == 'completed' %}
+                <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/ocr/{{ attachment.id }}">
+                  <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+                  <textarea name="corrected_text" rows="6">{{ result.corrected_text if result.corrected_text is not none else result.raw_text }}</textarea>
+                  <button class="button secondary" type="submit">Zapisz korektę OCR</button>
+                  {% if result.reviewed_at %}<span class="badge">Sprawdzone ręcznie</span>{% endif %}
+                </form>
+              {% endif %}
+            </div>
+          {% endif %}
+        {% endfor %}
+      </section>
+    {% endif %}
+
     <section class="panel">
       <div class="section-heading">
         <div><p class="eyebrow">Analiza wspomagająca</p><h2>TypeSafe Jev</h2></div>

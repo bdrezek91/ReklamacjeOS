@@ -5,6 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-pol \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --system app && adduser --system --ingroup app app
 
 COPY requirements.txt .
@@ -20,4 +24,3 @@ USER app
 EXPOSE 8000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-

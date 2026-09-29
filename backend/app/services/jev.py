@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from typesafe_sdk import Noul, Score, TypeSafeClient
 
 from ..config import settings
-from ..models import Complaint, ComplaintEvent, JevAssessment, WhatsAppMessage
+from ..models import Attachment, Complaint, ComplaintEvent, JevAssessment, WhatsAppMessage
 from .grouping import DraftOperationError
 
 
@@ -53,7 +53,21 @@ def build_jev_state(complaint: Complaint) -> dict[str, Any]:
             }
             for message in messages[:50]
         ],
-        "ocr": [],
+        "ocr": [
+            {
+                "attachment_id": attachment.id,
+                "text": (
+                    attachment.ocr_result.corrected_text
+                    if attachment.ocr_result.corrected_text is not None
+                    else attachment.ocr_result.raw_text
+                )[:4000],
+                "confidence": attachment.ocr_result.confidence,
+                "reviewed": attachment.ocr_result.reviewed_at is not None,
+            }
+            for message in messages
+            for attachment in message.attachments
+            if attachment.ocr_result is not None and attachment.ocr_result.status == "completed"
+        ],
     }
 
 
@@ -90,7 +104,11 @@ def analyze_complaint_with_jev(
 ) -> JevAssessment:
     complaint = db.scalar(
         select(Complaint)
-        .options(selectinload(Complaint.messages).selectinload(WhatsAppMessage.attachments))
+        .options(
+            selectinload(Complaint.messages)
+            .selectinload(WhatsAppMessage.attachments)
+            .selectinload(Attachment.ocr_result)
+        )
         .where(Complaint.id == complaint_id)
     )
     if complaint is None or complaint.merged_into_id is not None:
