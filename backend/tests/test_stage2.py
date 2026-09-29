@@ -178,6 +178,7 @@ def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_pat
         select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id).order_by(WhatsAppOutbox.id)
     ).all()
     assert complaint.whatsapp_resolution == "use_first_grade_next_pavilions"
+    assert complaint.status == ComplaintStatus.CLOSED
     assert len(outboxes) == 2
     assert outboxes[0].message_kind == "acceptance"
     assert outboxes[1].message_kind == "resolution"

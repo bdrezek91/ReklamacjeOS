@@ -236,6 +236,14 @@ def enqueue_whatsapp_resolution(
     body = WHATSAPP_RESOLUTIONS.get(resolution)
     if body is None:
         raise DraftOperationError("Nieznany status WhatsApp")
+    active_email = db.scalar(
+        select(EmailOutbox).where(
+            EmailOutbox.complaint_id == complaint.id,
+            EmailOutbox.status.in_({"pending", "processing"}),
+        )
+    )
+    if active_email is not None:
+        raise DraftOperationError("Nie można zamknąć reklamacji podczas trwającej wysyłki e-mail")
     existing = db.scalar(
         select(WhatsAppOutbox).where(
             WhatsAppOutbox.complaint_id == complaint.id,
@@ -245,7 +253,9 @@ def enqueue_whatsapp_resolution(
     if existing is not None:
         raise DraftOperationError("Decyzja WhatsApp dla tej reklamacji została już zlecona")
 
+    previous_status = complaint.status
     complaint.whatsapp_resolution = resolution
+    complaint.status = ComplaintStatus.CLOSED
     complaint.updated_at = func.now()
     item = WhatsAppOutbox(
         complaint_id=complaint.id,
@@ -261,6 +271,18 @@ def enqueue_whatsapp_resolution(
             event_type="whatsapp_resolution_queued",
             actor=actor,
             details={"resolution": resolution},
+        )
+    )
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint.id,
+            event_type="status_changed",
+            actor=actor,
+            details={
+                "from": previous_status.value,
+                "to": ComplaintStatus.CLOSED.value,
+                "reason": "whatsapp_resolution",
+            },
         )
     )
     db.flush()

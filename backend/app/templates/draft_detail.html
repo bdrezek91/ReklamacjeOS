@@ -113,7 +113,7 @@
       <section class="notice">Dostawca: <strong>{{ complaint.supplier.name }}</strong> · {{ complaint.supplier.email }}</section>
     {% endif %}
 
-    {% if complaint.status.value in ['accepted', 'ready_to_send', 'sent'] %}
+    {% if complaint.whatsapp_resolution or complaint.status.value in ['accepted', 'ready_to_send', 'sent'] %}
       <section class="panel correspondence-panel">
         <div class="section-heading">
           <div><p class="eyebrow">Decyzja dla grupy</p><h2>Status WhatsApp</h2></div>

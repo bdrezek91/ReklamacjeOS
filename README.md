@@ -87,7 +87,7 @@ W `.env` ustaw osobno wygenerowane wartości jako `POSTGRES_PASSWORD`, hasło ta
 
 Sesja jest w nazwanym wolumenie `whatsapp_session`, więc zwykły restart lub przebudowa kontenera jej nie usuwa. Nie uruchamiaj `docker compose down -v`, jeśli chcesz zachować sesję i dane.
 
-Po zaakceptowaniu reklamacji karta udostępnia dwie decyzje: „Wykorzystać na 1 gatunek w następnych pawilonach.” oraz „Zwracamy do producenta.”. Zatwierdzenie wybranej decyzji wymaga potwierdzenia operatora i tworzy drugi, audytowany komunikat w kolejce WhatsApp; nie zastępuje wcześniejszej wiadomości z numerem reklamacji ani nie zmienia statusu procesu reklamacyjnego.
+Po zaakceptowaniu reklamacji karta udostępnia dwie decyzje: „Wykorzystać na 1 gatunek w następnych pawilonach.” oraz „Zwracamy do producenta.”. Zatwierdzenie wybranej decyzji wymaga potwierdzenia operatora, zamyka reklamację i tworzy drugi, audytowany komunikat w kolejce WhatsApp; nie zastępuje wcześniejszej wiadomości z numerem reklamacji. System blokuje zamknięcie, jeśli trwa automatyczna wysyłka e-mail.
 
 ### Panel i HTTPS
 
