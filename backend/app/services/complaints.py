@@ -29,7 +29,8 @@ CARD_FIELDS = (
 
 WARSAW = ZoneInfo("Europe/Warsaw")
 WHATSAPP_RESOLUTIONS = {
-    "use_first_grade_then_return": "Wykorzystać na 1 gatunek w następnych pawilonach i zwracamy do producenta.",
+    "use_first_grade_next_pavilions": "Wykorzystać na 1 gatunek w następnych pawilonach.",
+    "return_to_manufacturer": "Zwracamy do producenta.",
 }
 
 

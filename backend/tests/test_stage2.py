@@ -158,11 +158,15 @@ def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_pat
     )
     session.commit()
 
+    detail_before = client.get(f"/drafts/{complaint.id}")
+    assert "Wykorzystać na 1 gatunek w następnych pawilonach." in detail_before.text
+    assert "Zwracamy do producenta." in detail_before.text
+
     queued = client.post(
         f"/drafts/{complaint.id}/whatsapp-resolution",
         data={
             "action_token": "panel-test-token",
-            "resolution": "use_first_grade_then_return",
+            "resolution": "use_first_grade_next_pavilions",
         },
         follow_redirects=False,
     )
@@ -173,14 +177,12 @@ def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_pat
     outboxes = session.scalars(
         select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id).order_by(WhatsAppOutbox.id)
     ).all()
-    assert complaint.whatsapp_resolution == "use_first_grade_then_return"
+    assert complaint.whatsapp_resolution == "use_first_grade_next_pavilions"
     assert len(outboxes) == 2
     assert outboxes[0].message_kind == "acceptance"
     assert outboxes[1].message_kind == "resolution"
     assert outboxes[1].status == "pending"
-    assert outboxes[1].body == (
-        "Reklamacja nr R/01/09/2026: Wykorzystać na 1 gatunek w następnych pawilonach i zwracamy do producenta."
-    )
+    assert outboxes[1].body == "Reklamacja nr R/01/09/2026: Wykorzystać na 1 gatunek w następnych pawilonach."
 
     detail = client.get(f"/drafts/{complaint.id}")
     assert detail.status_code == 200
@@ -191,7 +193,7 @@ def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_pat
         f"/drafts/{complaint.id}/whatsapp-resolution",
         data={
             "action_token": "panel-test-token",
-            "resolution": "use_first_grade_then_return",
+            "resolution": "return_to_manufacturer",
         },
         follow_redirects=False,
     )
