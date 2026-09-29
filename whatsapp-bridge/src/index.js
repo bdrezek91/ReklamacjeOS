@@ -5,6 +5,10 @@ const http = require("http");
 const path = require("path");
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require("whatsapp-web.js");
+const { retryDelayMs } = require("./retry");
+
+const OUTBOX_POLL_INTERVAL_MS = 5000;
+const OUTBOX_MAX_RETRY_MS = 60000;
 
 const config = {
   backendUrl: (process.env.BACKEND_URL || "http://backend:8000").replace(/\/$/, ""),
@@ -48,6 +52,9 @@ const processing = new Set();
 let whatsappReady = false;
 let outboxPolling = false;
 let outboxTimer = null;
+let outboxConsecutiveErrors = 0;
+let outboxRetryDelayMs = OUTBOX_POLL_INTERVAL_MS;
+let outboxLastBackendSuccessAt = null;
 
 function log(message, metadata = {}) {
   const safe = { ...metadata };
@@ -79,7 +86,17 @@ const healthServer = http.createServer((request, response) => {
   }
 
   response.writeHead(whatsappReady ? 200 : 503, { "Content-Type": "application/json" });
-  response.end(JSON.stringify({ status: whatsappReady ? "ready" : "starting" }));
+  response.end(
+    JSON.stringify({
+      status: whatsappReady ? "ready" : "starting",
+      outbox: {
+        backend: outboxConsecutiveErrors ? "retrying" : "ok",
+        consecutiveErrors: outboxConsecutiveErrors,
+        lastSuccessAt: outboxLastBackendSuccessAt,
+        nextPollMs: outboxRetryDelayMs,
+      },
+    }),
+  );
 });
 
 healthServer.listen(config.healthPort, "0.0.0.0", () => {
@@ -209,6 +226,38 @@ async function reportOutboxResult(itemId, result, data) {
   });
 }
 
+function markOutboxBackendSuccess() {
+  if (outboxConsecutiveErrors) {
+    log("Połączenie kolejki WhatsApp z backendem odzyskane", { previousErrors: outboxConsecutiveErrors });
+  }
+  outboxConsecutiveErrors = 0;
+  outboxRetryDelayMs = OUTBOX_POLL_INTERVAL_MS;
+  outboxLastBackendSuccessAt = new Date().toISOString();
+}
+
+function markOutboxBackendFailure(error) {
+  outboxConsecutiveErrors += 1;
+  outboxRetryDelayMs = retryDelayMs(outboxConsecutiveErrors, {
+    baseMs: OUTBOX_POLL_INTERVAL_MS,
+    maxMs: OUTBOX_MAX_RETRY_MS,
+  });
+  log("Błąd połączenia kolejki WhatsApp z backendem", {
+    error: error.message,
+    consecutiveErrors: outboxConsecutiveErrors,
+    nextRetryMs: outboxRetryDelayMs,
+    lastSuccessAt: outboxLastBackendSuccessAt,
+  });
+}
+
+function scheduleOutboxPoll(delayMs = outboxRetryDelayMs) {
+  if (outboxTimer) clearTimeout(outboxTimer);
+  outboxTimer = setTimeout(async () => {
+    outboxTimer = null;
+    await pollOutbox();
+    if (whatsappReady) scheduleOutboxPoll(outboxRetryDelayMs);
+  }, delayMs);
+}
+
 async function pollOutbox() {
   if (!whatsappReady || outboxPolling || !config.groupId) return;
   outboxPolling = true;
@@ -219,6 +268,7 @@ async function pollOutbox() {
       timeout: 15000,
       validateStatus: (status) => status === 200 || status === 204,
     });
+    markOutboxBackendSuccess();
     if (response.status === 204) return;
     item = response.data;
 
@@ -246,7 +296,11 @@ async function pollOutbox() {
       });
     }
   } catch (error) {
-    log("Błąd obsługi kolejki numerów reklamacji", { outboxId: item?.id, error: error.message });
+    if (item) {
+      log("Błąd obsługi kolejki numerów reklamacji", { outboxId: item.id, error: error.message });
+    } else {
+      markOutboxBackendFailure(error);
+    }
   } finally {
     outboxPolling = false;
   }
@@ -260,10 +314,14 @@ client.on("qr", (qr) => {
 client.on("authenticated", () => log("WhatsApp uwierzytelniony"));
 client.on("auth_failure", (error) => {
   whatsappReady = false;
+  if (outboxTimer) clearTimeout(outboxTimer);
+  outboxTimer = null;
   log("Błąd uwierzytelnienia WhatsApp", { error });
 });
 client.on("disconnected", (reason) => {
   whatsappReady = false;
+  if (outboxTimer) clearTimeout(outboxTimer);
+  outboxTimer = null;
   log("WhatsApp rozłączony", { reason });
 });
 client.on("ready", async () => {
@@ -271,7 +329,7 @@ client.on("ready", async () => {
   log("WhatsApp bridge gotowy");
   await printGroups().catch((error) => log("Nie udało się pobrać grup", { error: error.message }));
   await pollOutbox();
-  outboxTimer = setInterval(pollOutbox, 5000);
+  scheduleOutboxPoll(outboxRetryDelayMs);
 });
 
 // `message` covers incoming messages; `message_create` also covers messages sent by
@@ -281,7 +339,7 @@ client.on("message_create", forwardMessage);
 
 process.on("SIGTERM", async () => {
   whatsappReady = false;
-  if (outboxTimer) clearInterval(outboxTimer);
+  if (outboxTimer) clearTimeout(outboxTimer);
   log("Zamykanie bridge");
   healthServer.close();
   await client.destroy();
