@@ -70,9 +70,7 @@ def assign_message_to_draft(
     rule = "new_draft"
 
     if message.quoted_message_id:
-        quoted = db.scalar(
-            select(WhatsAppMessage).where(WhatsAppMessage.wa_message_id == message.quoted_message_id)
-        )
+        quoted = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.wa_message_id == message.quoted_message_id))
         if quoted is not None:
             complaint = _active_complaint(db, quoted.complaint_id)
             if complaint is not None:

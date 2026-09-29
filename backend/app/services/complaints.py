@@ -55,9 +55,10 @@ def update_complaint_card(
     actor: str,
 ) -> Complaint:
     complaint = _editable_complaint(db, complaint_id)
-    if complaint.status == ComplaintStatus.READY_TO_SEND and db.scalar(
-        select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id)
-    ) is not None:
+    if (
+        complaint.status == ComplaintStatus.READY_TO_SEND
+        and db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id)) is not None
+    ):
         raise DraftOperationError("Nie można zmienić karty po zleceniu wysyłki")
     current = dict(complaint.approved_data or {})
     changed_fields: list[str] = []
@@ -180,8 +181,7 @@ def accept_complaint(
     local_time = accepted_at or datetime.now(WARSAW)
     official_number = allocate_monthly_number(db, year=local_time.year, month=local_time.month)
     body = (
-        f"Przyjęto reklamację nr {official_number}. "
-        f"Proszę opisać reklamowane płyty: reklamacja nr {official_number}."
+        f"Przyjęto reklamację nr {official_number}. Proszę opisać reklamowane płyty: reklamacja nr {official_number}."
     )
 
     complaint.official_number = official_number

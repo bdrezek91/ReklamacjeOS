@@ -51,9 +51,7 @@ templates.env.globals["root_path"] = settings.root_path
 
 
 def verify_panel_action_token(action_token: str) -> None:
-    if not settings.panel_action_token or not secrets.compare_digest(
-        action_token, settings.panel_action_token
-    ):
+    if not settings.panel_action_token or not secrets.compare_digest(action_token, settings.panel_action_token):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid panel action token")
 
 
@@ -280,9 +278,7 @@ def update_complaint_card_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/status")
@@ -300,9 +296,7 @@ def change_complaint_status_action(
     except (DraftOperationError, ValueError) as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/accept")
@@ -323,9 +317,7 @@ def accept_complaint_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/retry-whatsapp")
@@ -341,9 +333,7 @@ def retry_whatsapp_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/split")
@@ -423,9 +413,7 @@ def assign_supplier_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/prepare-email")
@@ -441,9 +429,7 @@ def prepare_email_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/email-draft")
@@ -469,20 +455,23 @@ def update_email_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/drafts/{complaint_id}/email.eml")
 def download_email(complaint_id: int, db: Session = Depends(get_db)) -> Response:
     complaint = db.get(Complaint, complaint_id)
     draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint_id))
-    if complaint is None or draft is None or complaint.status not in {
-        ComplaintStatus.READY_TO_SEND,
-        ComplaintStatus.SENT,
-        ComplaintStatus.CLOSED,
-    }:
+    if (
+        complaint is None
+        or draft is None
+        or complaint.status
+        not in {
+            ComplaintStatus.READY_TO_SEND,
+            ComplaintStatus.SENT,
+            ComplaintStatus.CLOSED,
+        }
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email draft not found")
 
     message = EmailMessage()
@@ -523,9 +512,7 @@ def mark_sent_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/send-smtp")
@@ -551,9 +538,7 @@ def send_smtp_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/retry-smtp")
@@ -569,6 +554,4 @@ def retry_smtp_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return RedirectResponse(
-        f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER
-    )
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)

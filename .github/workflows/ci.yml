@@ -50,6 +50,7 @@ jobs:
           password_hash="$(docker run --rm caddy:2.8-alpine caddy hash-password --plaintext 'ci-password')"
           sed -i '/^PANEL_PASSWORD_HASH=/d' .env
           printf "PANEL_PASSWORD_HASH='%s'\n" "$password_hash" >> .env
+          docker network create multiplekser-shared
 
       - name: Validate and build containers
         run: |
@@ -73,5 +74,4 @@ jobs:
 
       - name: Stop stack
         if: always()
-        run: docker compose down -v
-
+        run: docker compose down

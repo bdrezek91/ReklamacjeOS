@@ -44,9 +44,7 @@ def save_supplier(
     supplier = db.get(Supplier, supplier_id) if supplier_id is not None else Supplier()
     if supplier is None:
         raise DraftOperationError("Dostawca nie istnieje")
-    duplicate = db.scalar(
-        select(Supplier).where(Supplier.name == clean_name, Supplier.id != (supplier_id or 0))
-    )
+    duplicate = db.scalar(select(Supplier).where(Supplier.name == clean_name, Supplier.id != (supplier_id or 0)))
     if duplicate is not None:
         raise DraftOperationError("Dostawca o tej nazwie już istnieje")
 

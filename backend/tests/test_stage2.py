@@ -192,8 +192,7 @@ def test_updates_card_gallery_and_status_with_audit(tmp_path):
     outbox = session.scalar(select(WhatsAppOutbox))
     assert outbox.status == "pending"
     assert outbox.body == (
-        "Przyjęto reklamację nr R/01/09/2026. "
-        "Proszę opisać reklamowane płyty: reklamacja nr R/01/09/2026."
+        "Przyjęto reklamację nr R/01/09/2026. Proszę opisać reklamowane płyty: reklamacja nr R/01/09/2026."
     )
 
     claimed = client.post(
@@ -229,10 +228,13 @@ def test_updates_card_gallery_and_status_with_audit(tmp_path):
     assert sent.status_code == 200
     session.expire_all()
     assert session.get(WhatsAppOutbox, outbox.id).status == "sent"
-    assert client.post(
-        "/api/internal/whatsapp/outbox/claim",
-        headers={"Authorization": "Bearer test-token"},
-    ).status_code == 204
+    assert (
+        client.post(
+            "/api/internal/whatsapp/outbox/claim",
+            headers={"Authorization": "Bearer test-token"},
+        ).status_code
+        == 204
+    )
 
     supplier_save = client.post(
         "/suppliers/save",

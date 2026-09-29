@@ -85,15 +85,19 @@ def deliver(item: EmailOutbox) -> None:
     message = build_message(item)
     context = ssl.create_default_context()
     smtp_class = smtplib.SMTP_SSL if settings.smtp_ssl else smtplib.SMTP
-    server = smtp_class(
-        settings.smtp_host,
-        settings.smtp_port,
-        timeout=settings.smtp_timeout_seconds,
-        context=context,
-    ) if settings.smtp_ssl else smtp_class(
-        settings.smtp_host,
-        settings.smtp_port,
-        timeout=settings.smtp_timeout_seconds,
+    server = (
+        smtp_class(
+            settings.smtp_host,
+            settings.smtp_port,
+            timeout=settings.smtp_timeout_seconds,
+            context=context,
+        )
+        if settings.smtp_ssl
+        else smtp_class(
+            settings.smtp_host,
+            settings.smtp_port,
+            timeout=settings.smtp_timeout_seconds,
+        )
     )
     try:
         server.ehlo()
