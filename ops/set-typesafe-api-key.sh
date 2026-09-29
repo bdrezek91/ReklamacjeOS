@@ -19,7 +19,7 @@ secret_tmp=$(mktemp .secrets/typesafe_api_key.XXXXXX)
 trap 'rm -f "$secret_tmp"' EXIT
 printf '%s' "$typesafe_secret" > "$secret_tmp"
 chmod 640 "$secret_tmp"
-mv "$secret_tmp" .secrets/typesafe_api_key
+mv -f "$secret_tmp" .secrets/typesafe_api_key
 trap - EXIT
 unset typesafe_secret
 
