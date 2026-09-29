@@ -73,6 +73,25 @@ def test_ingest_is_idempotent(tmp_path):
     assert len(session.scalars(select(WhatsAppMessage)).all()) == 1
 
 
+def test_ignores_messages_sent_by_connected_account(tmp_path):
+    client, session = make_client(tmp_path)
+    own_message = client.post(
+        "/api/internal/whatsapp/messages",
+        data=payload(
+            wa_message_id="own-outbound-message",
+            body="Reklamacja nr R/03/09/2026: Zwracamy do producenta.",
+            source_payload='{"fromMe": true}',
+        ),
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert own_message.status_code == 200
+    assert own_message.json()["ignored"] is True
+    assert (
+        session.scalar(select(WhatsAppMessage).where(WhatsAppMessage.wa_message_id == "own-outbound-message")) is None
+    )
+
+
 def test_saves_original_image(tmp_path):
     client, session = make_client(tmp_path)
     response = client.post(

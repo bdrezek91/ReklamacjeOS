@@ -122,6 +122,22 @@ async def ingest_whatsapp_message(
     if group_id != settings.whatsapp_group_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Group is not whitelisted")
 
+    try:
+        payload = json.loads(source_payload)
+        if not isinstance(payload, dict):
+            raise ValueError
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid source_payload JSON")
+    if payload.get("fromMe") is True:
+        return {
+            "created": False,
+            "ignored": True,
+            "reason": "from_me",
+            "complaint_id": None,
+            "draft_number": None,
+            "official_number": None,
+        }
+
     existing = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.wa_message_id == wa_message_id))
     if existing:
         complaint = db.get(Complaint, existing.complaint_id) if existing.complaint_id else None
@@ -135,13 +151,6 @@ async def ingest_whatsapp_message(
             "draft_number": complaint.draft_number if complaint else None,
             "official_number": complaint.official_number if complaint else None,
         }
-
-    try:
-        payload = json.loads(source_payload)
-        if not isinstance(payload, dict):
-            raise ValueError
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid source_payload JSON")
 
     message = WhatsAppMessage(
         wa_message_id=wa_message_id,

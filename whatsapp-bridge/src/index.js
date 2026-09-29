@@ -5,6 +5,7 @@ const http = require("http");
 const path = require("path");
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require("whatsapp-web.js");
+const { shouldIgnoreMessage } = require("./message_filter");
 const { retryDelayMs } = require("./retry");
 
 const OUTBOX_POLL_INTERVAL_MS = 5000;
@@ -138,15 +139,7 @@ function fileNameFor(media, messageId) {
 
 async function forwardMessage(message) {
   const messageId = message.id?._serialized;
-  if (!messageId || processing.has(messageId)) return;
-  if (
-    message.fromMe &&
-    /^Przyjęto reklamację nr R\/\d+\/\d{2}\/\d{4}\. Proszę opisać reklamowane płyty: reklamacja nr R\/\d+\/\d{2}\/\d{4}\.$/.test(
-      message.body || "",
-    )
-  ) {
-    return;
-  }
+  if (!messageId || processing.has(messageId) || shouldIgnoreMessage(message)) return;
   processing.add(messageId);
 
   try {
