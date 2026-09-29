@@ -40,6 +40,7 @@ from .services.correspondence import (
     update_email_draft,
 )
 from .services.grouping import DraftOperationError, merge_drafts, split_draft
+from .services.jev import analyze_complaint_with_jev, answer_rows
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -160,6 +161,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             selectinload(Complaint.events),
             selectinload(Complaint.merged_into),
             selectinload(Complaint.supplier),
+            selectinload(Complaint.jev_assessments),
         )
         .where(Complaint.id == complaint_id)
     )
@@ -183,6 +185,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     email_draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
     email_outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id))
     suppliers = db.scalars(select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)).all()
+    latest_jev_assessment = max(complaint.jev_assessments, key=lambda item: item.id, default=None)
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
@@ -223,9 +226,33 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "email_draft": email_draft,
             "email_outbox": email_outbox,
             "smtp_configured": settings.smtp_configured,
+            "typesafe_configured": settings.typesafe_configured,
+            "jev_assessment": latest_jev_assessment,
+            "jev_answer_rows": answer_rows(latest_jev_assessment),
             "suppliers": suppliers,
         },
     )
+
+
+@app.post("/drafts/{complaint_id}/analyze-jev")
+def analyze_jev_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    if not settings.typesafe_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="TypeSafe Jev nie jest skonfigurowany",
+        )
+    try:
+        analyze_complaint_with_jev(db, complaint_id)
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/merge")

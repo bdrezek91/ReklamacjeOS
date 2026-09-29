@@ -4,5 +4,5 @@ jinja2==3.1.5
 psycopg[binary]==3.2.4
 python-multipart==0.0.20
 sqlalchemy==2.0.38
+typesafe-sdk==0.7.2
 uvicorn[standard]==0.34.0
-

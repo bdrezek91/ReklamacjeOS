@@ -44,11 +44,19 @@ class Settings:
     smtp_ssl: bool = env_bool("SMTP_SSL", False)
     smtp_timeout_seconds: int = int(os.getenv("SMTP_TIMEOUT_SECONDS", "30"))
     email_worker_interval_seconds: int = int(os.getenv("EMAIL_WORKER_INTERVAL_SECONDS", "5"))
+    typesafe_enabled: bool = env_bool("TYPESAFE_ENABLED", False)
+    typesafe_api_key: str = read_secret("TYPESAFE_API_KEY", "TYPESAFE_API_KEY_FILE")
+    typesafe_model: str = os.getenv("TYPESAFE_MODEL", "jev-latest").strip()
+    typesafe_timeout_seconds: int = int(os.getenv("TYPESAFE_TIMEOUT_SECONDS", "15"))
 
     @property
     def smtp_configured(self) -> bool:
         has_credentials = not self.smtp_username or bool(self.smtp_password)
         return bool(self.smtp_enabled and self.smtp_host and self.smtp_from_address and has_credentials)
+
+    @property
+    def typesafe_configured(self) -> bool:
+        return bool(self.typesafe_enabled and self.typesafe_api_key and self.typesafe_model)
 
 
 settings = Settings()

@@ -60,6 +60,36 @@
       </form>
     </section>
 
+    <section class="panel">
+      <div class="section-heading">
+        <div><p class="eyebrow">Analiza wspomagająca</p><h2>TypeSafe Jev</h2></div>
+        {% if typesafe_configured %}
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/analyze-jev" onsubmit="return confirm('Przesłać treść zgłoszenia do TypeSafe Jev w celu analizy?')">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="button secondary" type="submit">{{ 'Analizuj ponownie' if jev_assessment else 'Analizuj zgłoszenie' }}</button>
+          </form>
+        {% endif %}
+      </div>
+      <p class="muted">Jev wyłącznie ocenia kompletność i charakter zgłoszenia. Nie zmienia danych, statusu, numeracji ani odbiorcy.</p>
+      {% if not typesafe_configured %}
+        <p class="notice warning">Integracja Jev jest wyłączona do czasu zapisania klucza TypeSafe.</p>
+      {% elif jev_assessment and jev_assessment.status == 'failed' %}
+        <p class="notice warning">Analiza nie powiodła się: {{ jev_assessment.last_error }}</p>
+      {% elif jev_assessment and jev_assessment.status == 'completed' %}
+        <p class="muted">Model: {{ jev_assessment.model }} · tokeny wejściowe: {{ jev_assessment.usage.get('input_tokens', '—') }}</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Ocena</th><th>Wynik</th><th>Confidence</th></tr></thead>
+            <tbody>
+              {% for row in jev_answer_rows %}
+                <tr><td>{{ row.label }}</td><td>{{ row.value }}</td><td>{{ row.confidence or '—' }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </section>
+
     {% if complaint.status.value in ['draft', 'pending_approval', 'accepted', 'ready_to_send'] %}
       <section class="panel supplier-assignment">
         <div class="section-heading">

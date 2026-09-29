@@ -65,6 +65,9 @@ class Complaint(Base):
     events: Mapped[list[ComplaintEvent]] = relationship(back_populates="complaint", cascade="all, delete-orphan")
     merged_into: Mapped[Complaint | None] = relationship(remote_side="Complaint.id", foreign_keys=[merged_into_id])
     supplier: Mapped[Supplier | None] = relationship(back_populates="complaints")
+    jev_assessments: Mapped[list[JevAssessment]] = relationship(
+        back_populates="complaint", cascade="all, delete-orphan"
+    )
 
 
 class Supplier(Base):
@@ -147,6 +150,24 @@ class ComplaintField(Base):
     confidence: Mapped[int | None] = mapped_column(Integer)
     is_uncertain: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JevAssessment(Base):
+    __tablename__ = "jev_assessments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    complaint_id: Mapped[int] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="typesafe")
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    answers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    complaint: Mapped[Complaint] = relationship(back_populates="jev_assessments")
 
 
 class WhatsAppOutbox(Base):
