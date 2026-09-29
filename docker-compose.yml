@@ -37,6 +37,8 @@ services:
     build:
       context: ./backend
     restart: unless-stopped
+    group_add:
+      - "${TYPESAFE_SECRET_GID:-1001}"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN}
@@ -49,9 +51,14 @@ services:
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_ENABLED: ${SMTP_ENABLED:-false}
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      TYPESAFE_ENABLED: ${TYPESAFE_ENABLED:-false}
+      TYPESAFE_API_KEY_FILE: /run/secrets/typesafe_api_key
+      TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
+      TYPESAFE_TIMEOUT_SECONDS: ${TYPESAFE_TIMEOUT_SECONDS:-15}
       TZ: ${TZ:-Europe/Warsaw}
     volumes:
       - complaint_data:/data/reklamacje
+      - ./.secrets/typesafe_api_key:/run/secrets/typesafe_api_key:ro
     depends_on:
       postgres:
         condition: service_healthy

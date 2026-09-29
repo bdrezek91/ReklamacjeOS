@@ -105,6 +105,12 @@ Automatyczna wysyłka pozostaje wyłączona przy `SMTP_ENABLED=false`. Po uzyska
 
 Backend zapisuje zatwierdzoną wiadomość i listę załączników w trwałej kolejce. Osobna usługa `email-worker` wysyła dokładnie tę kopię. Reklamacja otrzymuje status „Wysłana” dopiero po przyjęciu wiadomości przez serwer SMTP. Błąd jednoznaczny można ponowić ręcznie; po zerwaniu połączenia z niejednoznacznym wynikiem system wymaga sprawdzenia skrzynki „Wysłane”, aby nie utworzyć duplikatu.
 
+### TypeSafe Jev
+
+Jev działa wyłącznie jako ręcznie uruchamiana analiza wspomagająca. Ocenia, czy treść opisuje reklamację, spójność wiadomości, pilność, jakość dowodów oraz dostępność danych wymaganych w karcie. Wyniki wraz z prawdopodobieństwami, confidence, wersją modelu i hashem wejścia są zapisywane w bazie. Jev nie zmienia danych zatwierdzonych, statusu, numeracji, dostawcy ani kolejek wysyłkowych.
+
+Klucz przechowuj w ignorowanym pliku `.secrets/typesafe_api_key`. Skrypt `ops/set-typesafe-api-key.sh` zapisuje go z ograniczonymi uprawnieniami i celowo pozostawia `TYPESAFE_ENABLED=false`. Po wdrożeniu i weryfikacji konfiguracji włącz integrację osobną zmianą `TYPESAFE_ENABLED=true` i odtwórz wyłącznie backend. Do Jev trafia tekst wiadomości oraz w przyszłości tekst uzyskany przez OCR; surowe zdjęcia nie są wysyłane do Jev.
+
 ## Dane i kopie zapasowe
 
 - PostgreSQL: wolumen `postgres_data`.

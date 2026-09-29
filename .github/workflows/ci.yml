@@ -45,6 +45,8 @@ jobs:
       - name: Prepare CI environment
         run: |
           cp .env.example .env
+          mkdir -p .secrets
+          touch .secrets/typesafe_api_key
           sed -i 's/CHANGE_ME_LONG_RANDOM_PASSWORD/ci_database_password/g' .env
           sed -i 's/CHANGE_ME_LONG_RANDOM_TOKEN/ci_bridge_token_0123456789abcdef/g' .env
           password_hash="$(docker run --rm caddy:2.8-alpine caddy hash-password --plaintext 'ci-password')"
