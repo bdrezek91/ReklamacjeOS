@@ -25,9 +25,9 @@ trap - EXIT
 unset smtp_secret
 
 if grep -q '^SMTP_ENABLED=' .env; then
-  sed -i 's/^SMTP_ENABLED=.*/SMTP_ENABLED=true/' .env
+  sed -i 's/^SMTP_ENABLED=.*/SMTP_ENABLED=false/' .env
 else
-  printf '\nSMTP_ENABLED=true\n' >> .env
+  printf '\nSMTP_ENABLED=false\n' >> .env
 fi
 smtp_secret_gid=$(id -g)
 if grep -q '^SMTP_SECRET_GID=' .env; then
@@ -37,4 +37,4 @@ else
 fi
 chmod 600 .env
 
-printf 'Haslo zapisane bez wyswietlania. SMTP zostalo oznaczone jako gotowe do uruchomienia.\n'
+printf 'Haslo zapisane bez wyswietlania. SMTP pozostaje wylaczone; wlacz je osobno po weryfikacji.\n'
