@@ -21,7 +21,7 @@ def upgrade() -> None:
             SELECT id, lower(status::text) AS previous_status
             FROM complaints
             WHERE whatsapp_resolution IS NOT NULL
-              AND status IN ('ACCEPTED', 'READY_TO_SEND', 'SENT')
+              AND status::text IN ('ACCEPTED', 'READY_TO_SEND', 'SENT')
         ), changed AS (
             UPDATE complaints AS complaint
             SET status = 'CLOSED', updated_at = now()
