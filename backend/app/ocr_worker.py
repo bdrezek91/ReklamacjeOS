@@ -68,19 +68,46 @@ def parse_tsv(output: str) -> tuple[str, float | None]:
     return text, confidence
 
 
-def recognize(path: Path) -> tuple[str, float | None, str]:
-    version = subprocess.run(
-        ["tesseract", "--version"], capture_output=True, text=True, timeout=10, check=True
-    ).stdout.splitlines()[0][:64]
+def select_candidate(
+    document: tuple[str, float | None], sparse: tuple[str, float | None]
+) -> tuple[str, float | None, int]:
+    document_text, document_confidence = document
+    if len(document_text.strip()) >= 12:
+        return document_text, document_confidence, 3
+    sparse_text, sparse_confidence = sparse
+    if len(sparse_text.strip()) >= 12 and sparse_confidence is not None and sparse_confidence >= 45:
+        return sparse_text, sparse_confidence, 11
+    return "", None, 3
+
+
+def run_tesseract(path: Path, page_segmentation_mode: int) -> tuple[str, float | None]:
     completed = subprocess.run(
-        ["tesseract", str(path), "stdout", "-l", settings.ocr_language, "--psm", "11", "tsv"],
+        [
+            "tesseract",
+            str(path),
+            "stdout",
+            "-l",
+            settings.ocr_language,
+            "--psm",
+            str(page_segmentation_mode),
+            "tsv",
+        ],
         capture_output=True,
         text=True,
         timeout=settings.ocr_timeout_seconds,
         check=True,
     )
-    text, confidence = parse_tsv(completed.stdout)
-    return text, confidence, version
+    return parse_tsv(completed.stdout)
+
+
+def recognize(path: Path) -> tuple[str, float | None, str]:
+    version = subprocess.run(
+        ["tesseract", "--version"], capture_output=True, text=True, timeout=10, check=True
+    ).stdout.splitlines()[0][:64]
+    document = run_tesseract(path, 3)
+    sparse = ("", None) if len(document[0].strip()) >= 12 else run_tesseract(path, 11)
+    text, confidence, page_segmentation_mode = select_candidate(document, sparse)
+    return text, confidence, f"{version}; psm={page_segmentation_mode}"[:64]
 
 
 def process_one(result_id: int) -> None:

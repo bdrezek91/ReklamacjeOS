@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.models import Attachment, ComplaintEvent, OcrResult
-from app.ocr_worker import parse_tsv
+from app.ocr_worker import parse_tsv, select_candidate
 
 from .test_ingest import make_client, payload
 
@@ -19,6 +19,20 @@ def test_parse_tsv_preserves_lines_and_calculates_weighted_confidence():
     assert text == "Panel ZS-3128\n4 sztuki"
     assert confidence is not None
     assert 79 < confidence < 82
+
+
+def test_prefers_document_text_and_rejects_uncertain_sparse_noise():
+    assert select_candidate(("Numer PC-35660/26/PW", 40.0), ("dużo szumu", 80.0)) == (
+        "Numer PC-35660/26/PW",
+        40.0,
+        3,
+    )
+    assert select_candidate(("", None), ("« 2 +:", 23.0)) == ("", None, 3)
+    assert select_candidate(("", None), ("Krótki czytelny napis", 72.0)) == (
+        "Krótki czytelny napis",
+        72.0,
+        11,
+    )
 
 
 def test_queues_and_reviews_local_ocr(tmp_path):
