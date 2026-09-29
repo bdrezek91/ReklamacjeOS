@@ -28,6 +28,9 @@ CARD_FIELDS = (
 )
 
 WARSAW = ZoneInfo("Europe/Warsaw")
+WHATSAPP_RESOLUTIONS = {
+    "use_first_grade_then_return": "Wykorzystać na 1 gatunek w następnych pawilonach i zwracamy do producenta.",
+}
 
 
 def _editable_complaint(db: Session, complaint_id: int) -> Complaint:
@@ -200,6 +203,7 @@ def accept_complaint(
             complaint_id=complaint.id,
             group_id=group_id,
             body=body,
+            message_kind="acceptance",
             status="pending",
         )
     )
@@ -207,8 +211,74 @@ def accept_complaint(
     return complaint
 
 
-def retry_whatsapp_notification(db: Session, complaint_id: int, *, actor: str) -> WhatsAppOutbox:
-    item = db.scalar(select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint_id))
+def enqueue_whatsapp_resolution(
+    db: Session,
+    complaint_id: int,
+    resolution: str,
+    *,
+    actor: str,
+    group_id: str,
+) -> WhatsAppOutbox:
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None or complaint.merged_into_id is not None:
+        raise DraftOperationError("Reklamacja nie istnieje")
+    if complaint.status not in {
+        ComplaintStatus.ACCEPTED,
+        ComplaintStatus.READY_TO_SEND,
+        ComplaintStatus.SENT,
+    }:
+        raise DraftOperationError("Decyzję można wysłać tylko dla zaakceptowanej reklamacji")
+    if not complaint.official_number:
+        raise DraftOperationError("Reklamacja nie ma numeru")
+    if not group_id:
+        raise DraftOperationError("Grupa WhatsApp nie jest skonfigurowana")
+    body = WHATSAPP_RESOLUTIONS.get(resolution)
+    if body is None:
+        raise DraftOperationError("Nieznany status WhatsApp")
+    existing = db.scalar(
+        select(WhatsAppOutbox).where(
+            WhatsAppOutbox.complaint_id == complaint.id,
+            WhatsAppOutbox.message_kind == "resolution",
+        )
+    )
+    if existing is not None:
+        raise DraftOperationError("Decyzja WhatsApp dla tej reklamacji została już zlecona")
+
+    complaint.whatsapp_resolution = resolution
+    complaint.updated_at = func.now()
+    item = WhatsAppOutbox(
+        complaint_id=complaint.id,
+        group_id=group_id,
+        body=f"Reklamacja nr {complaint.official_number}: {body}",
+        message_kind="resolution",
+        status="pending",
+    )
+    db.add(item)
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint.id,
+            event_type="whatsapp_resolution_queued",
+            actor=actor,
+            details={"resolution": resolution},
+        )
+    )
+    db.flush()
+    return item
+
+
+def retry_whatsapp_notification(
+    db: Session,
+    complaint_id: int,
+    *,
+    actor: str,
+    message_kind: str = "acceptance",
+) -> WhatsAppOutbox:
+    item = db.scalar(
+        select(WhatsAppOutbox).where(
+            WhatsAppOutbox.complaint_id == complaint_id,
+            WhatsAppOutbox.message_kind == message_kind,
+        )
+    )
     if item is None:
         raise DraftOperationError("Brak komunikatu WhatsApp dla tej reklamacji")
     if item.status != "failed":
@@ -220,7 +290,11 @@ def retry_whatsapp_notification(db: Session, complaint_id: int, *, actor: str) -
     db.add(
         ComplaintEvent(
             complaint_id=complaint_id,
-            event_type="whatsapp_number_retry_requested",
+            event_type=(
+                "whatsapp_resolution_retry_requested"
+                if message_kind == "resolution"
+                else "whatsapp_number_retry_requested"
+            ),
             actor=actor,
             details={"outbox_id": item.id},
         )

@@ -138,6 +138,80 @@ def test_panel_actions_require_token(tmp_path):
     assert response.status_code == 403
 
 
+def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_path):
+    client, session = make_client(tmp_path)
+    complaint = Complaint(
+        draft_number="DRAFT-0001",
+        official_number="R/01/09/2026",
+        status=ComplaintStatus.ACCEPTED,
+    )
+    session.add(complaint)
+    session.flush()
+    session.add(
+        WhatsAppOutbox(
+            complaint_id=complaint.id,
+            group_id="allowed-group@g.us",
+            body="Przyjęto reklamację nr R/01/09/2026.",
+            message_kind="acceptance",
+            status="sent",
+        )
+    )
+    session.commit()
+
+    queued = client.post(
+        f"/drafts/{complaint.id}/whatsapp-resolution",
+        data={
+            "action_token": "panel-test-token",
+            "resolution": "use_first_grade_then_return",
+        },
+        follow_redirects=False,
+    )
+    assert queued.status_code == 303
+
+    session.expire_all()
+    complaint = session.get(Complaint, complaint.id)
+    outboxes = session.scalars(
+        select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id).order_by(WhatsAppOutbox.id)
+    ).all()
+    assert complaint.whatsapp_resolution == "use_first_grade_then_return"
+    assert len(outboxes) == 2
+    assert outboxes[0].message_kind == "acceptance"
+    assert outboxes[1].message_kind == "resolution"
+    assert outboxes[1].status == "pending"
+    assert outboxes[1].body == (
+        "Reklamacja nr R/01/09/2026: Wykorzystać na 1 gatunek w następnych pawilonach i zwracamy do producenta."
+    )
+
+    detail = client.get(f"/drafts/{complaint.id}")
+    assert detail.status_code == 200
+    assert "Nadaj status i wyślij na WhatsApp" not in detail.text
+    assert "Wykorzystać na 1 gatunek" in detail.text
+
+    duplicate = client.post(
+        f"/drafts/{complaint.id}/whatsapp-resolution",
+        data={
+            "action_token": "panel-test-token",
+            "resolution": "use_first_grade_then_return",
+        },
+        follow_redirects=False,
+    )
+    assert duplicate.status_code == 400
+
+    claimed = client.post(
+        "/api/internal/whatsapp/outbox/claim",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert claimed.status_code == 200
+    assert claimed.json()["id"] == outboxes[1].id
+    sent = client.post(
+        f"/api/internal/whatsapp/outbox/{outboxes[1].id}/sent",
+        data={"wa_message_id": "sent-resolution-message"},
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert sent.status_code == 200
+    assert "whatsapp_resolution_sent" in set(session.scalars(select(ComplaintEvent.event_type)).all())
+
+
 def test_updates_card_gallery_and_status_with_audit(tmp_path):
     client, session = make_client(tmp_path)
     response = client.post(

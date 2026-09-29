@@ -65,7 +65,7 @@ def mark_whatsapp_outbox_sent(
     db.add(
         ComplaintEvent(
             complaint_id=item.complaint_id,
-            event_type="whatsapp_number_sent",
+            event_type=("whatsapp_resolution_sent" if item.message_kind == "resolution" else "whatsapp_number_sent"),
             actor="whatsapp-bridge",
             details={"outbox_id": item.id, "wa_message_id": wa_message_id},
         )
@@ -91,7 +91,9 @@ def mark_whatsapp_outbox_failed(
     db.add(
         ComplaintEvent(
             complaint_id=item.complaint_id,
-            event_type="whatsapp_number_failed",
+            event_type=(
+                "whatsapp_resolution_failed" if item.message_kind == "resolution" else "whatsapp_number_failed"
+            ),
             actor="whatsapp-bridge",
             details={"outbox_id": item.id, "error": item.last_error},
         )

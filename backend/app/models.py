@@ -56,6 +56,7 @@ class Complaint(Base):
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True)
     status: Mapped[ComplaintStatus] = mapped_column(Enum(ComplaintStatus), default=ComplaintStatus.DRAFT)
     approved_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    whatsapp_resolution: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -172,9 +173,11 @@ class JevAssessment(Base):
 
 class WhatsAppOutbox(Base):
     __tablename__ = "whatsapp_outbox"
+    __table_args__ = (UniqueConstraint("complaint_id", "message_kind", name="uq_whatsapp_outbox_complaint_kind"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    complaint_id: Mapped[int] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"), unique=True, index=True)
+    complaint_id: Mapped[int] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"), index=True)
+    message_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="acceptance")
     group_id: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)

@@ -24,8 +24,10 @@ from .models import (
     WhatsAppOutbox,
 )
 from .services.complaints import (
+    WHATSAPP_RESOLUTIONS,
     accept_complaint,
     change_complaint_status,
+    enqueue_whatsapp_resolution,
     retry_whatsapp_notification,
     update_complaint_card,
 )
@@ -181,7 +183,11 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     events = sorted(complaint.events, key=lambda event: (event.created_at, event.id), reverse=True)
     attachment_count = sum(len(message.attachments) for message in messages)
     attachments = [attachment for message in messages for attachment in message.attachments]
-    outbox = db.scalar(select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id))
+    outboxes = db.scalars(
+        select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id).order_by(WhatsAppOutbox.id)
+    ).all()
+    acceptance_outbox = next((item for item in outboxes if item.message_kind == "acceptance"), None)
+    resolution_outbox = next((item for item in outboxes if item.message_kind == "resolution"), None)
     email_draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
     email_outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id))
     suppliers = db.scalars(select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)).all()
@@ -222,7 +228,9 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
                 ("notes", "Uwagi"),
             ),
             "panel_action_token": settings.panel_action_token,
-            "outbox": outbox,
+            "acceptance_outbox": acceptance_outbox,
+            "resolution_outbox": resolution_outbox,
+            "whatsapp_resolutions": WHATSAPP_RESOLUTIONS,
             "email_draft": email_draft,
             "email_outbox": email_outbox,
             "smtp_configured": settings.smtp_configured,
@@ -356,6 +364,45 @@ def retry_whatsapp_action(
     verify_panel_action_token(action_token)
     try:
         retry_whatsapp_notification(db, complaint_id, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/whatsapp-resolution")
+def whatsapp_resolution_action(
+    complaint_id: int,
+    resolution: str = Form(...),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        enqueue_whatsapp_resolution(
+            db,
+            complaint_id,
+            resolution,
+            actor="panel",
+            group_id=settings.whatsapp_group_id,
+        )
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/retry-whatsapp-resolution")
+def retry_whatsapp_resolution_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        retry_whatsapp_notification(db, complaint_id, actor="panel", message_kind="resolution")
         db.commit()
     except DraftOperationError as error:
         db.rollback()

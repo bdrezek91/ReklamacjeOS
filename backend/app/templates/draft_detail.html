@@ -113,6 +113,42 @@
       <section class="notice">Dostawca: <strong>{{ complaint.supplier.name }}</strong> · {{ complaint.supplier.email }}</section>
     {% endif %}
 
+    {% if complaint.status.value in ['accepted', 'ready_to_send', 'sent'] %}
+      <section class="panel correspondence-panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">Decyzja dla grupy</p><h2>Status WhatsApp</h2></div>
+        </div>
+        {% if complaint.whatsapp_resolution %}
+          <p><strong>{{ whatsapp_resolutions.get(complaint.whatsapp_resolution, complaint.whatsapp_resolution) }}</strong></p>
+        {% elif not resolution_outbox %}
+          <p class="muted">Wybranie statusu zleci jego wysłanie na skonfigurowaną grupę WhatsApp.</p>
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/whatsapp-resolution" onsubmit="return confirm('Nadać ten status i wysłać go na grupę WhatsApp?')">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <label>Status
+              <select name="resolution" required>
+                {% for value, label in whatsapp_resolutions.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+              </select>
+            </label>
+            <button class="button" type="submit">Nadaj status i wyślij na WhatsApp</button>
+          </form>
+        {% endif %}
+        {% if resolution_outbox %}
+          <p class="notice {{ 'success' if resolution_outbox.status == 'sent' else 'warning' }}">
+            {% if resolution_outbox.status == 'sent' %}Status wysłany na grupę WhatsApp.
+            {% elif resolution_outbox.status == 'failed' %}Wysyłka statusu nie powiodła się.
+            {% elif resolution_outbox.status == 'processing' %}Trwa wysyłanie statusu.
+            {% else %}Status oczekuje na wysłanie.{% endif %}
+          </p>
+          {% if resolution_outbox.status == 'failed' %}
+            <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/retry-whatsapp-resolution">
+              <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+              <button class="button secondary" type="submit">Ponów wysyłkę statusu</button>
+            </form>
+          {% endif %}
+        {% endif %}
+      </section>
+    {% endif %}
+
     {% if complaint.status.value == 'accepted' %}
       <section class="panel correspondence-panel">
         <h2>Reklamacja do dostawcy</h2>
@@ -200,10 +236,10 @@
       </form>
     {% endif %}
 
-    {% if outbox %}
-      <section class="notice {{ 'success' if outbox.status == 'sent' else 'warning' }}">
-        WhatsApp: {% if outbox.status == 'sent' %}numer wysłany na grupę{% elif outbox.status == 'failed' %}wysyłka nieudana{% elif outbox.status == 'processing' %}wysyłanie numeru{% else %}numer oczekuje na wysłanie{% endif %}.
-        {% if outbox.status == 'failed' %}
+    {% if acceptance_outbox %}
+      <section class="notice {{ 'success' if acceptance_outbox.status == 'sent' else 'warning' }}">
+        WhatsApp: {% if acceptance_outbox.status == 'sent' %}numer wysłany na grupę{% elif acceptance_outbox.status == 'failed' %}wysyłka nieudana{% elif acceptance_outbox.status == 'processing' %}wysyłanie numeru{% else %}numer oczekuje na wysłanie{% endif %}.
+        {% if acceptance_outbox.status == 'failed' %}
           <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/retry-whatsapp">
             <input type="hidden" name="action_token" value="{{ panel_action_token }}">
             <button class="button secondary" type="submit">Ponów wysyłkę</button>
