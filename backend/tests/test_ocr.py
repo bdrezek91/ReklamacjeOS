@@ -46,15 +46,17 @@ def test_queues_and_reviews_local_ocr(tmp_path):
     complaint_id = response.json()["complaint_id"]
     attachment = session.scalar(select(Attachment))
 
-    queued = client.post(
+    result = session.scalar(select(OcrResult))
+    assert result is not None
+    assert result.attachment_id == attachment.id
+    assert result.status == "pending"
+
+    already_queued = client.post(
         f"/drafts/{complaint_id}/ocr",
         data={"action_token": "panel-test-token"},
         follow_redirects=False,
     )
-    assert queued.status_code == 303
-    result = session.scalar(select(OcrResult))
-    assert result.attachment_id == attachment.id
-    assert result.status == "pending"
+    assert already_queued.status_code == 400
 
     result.status = "completed"
     result.raw_text = "Panel 2S-312B"

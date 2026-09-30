@@ -1,23 +1,47 @@
 {% extends "base.html" %}
-{% block title %}Dashboard · ReklamacjeOS{% endblock %}
+{% block title %}Pulpit · ReklamacjeOS{% endblock %}
 {% block content %}
   <div class="page-heading">
-    <div><p class="eyebrow">Przegląd systemu</p><h1>Dashboard</h1></div>
+    <div><p class="eyebrow">Reklamacje produkcyjne</p><h1>Pulpit</h1></div>
     <span class="badge success">System działa</span>
   </div>
+
   <section class="stats">
-    <article><span>Wiadomości WhatsApp</span><strong>{{ message_count }}</strong></article>
-    <article><span>Oryginalne zdjęcia</span><strong>{{ attachment_count }}</strong></article>
-    <article><span>Drafty</span><strong>{{ draft_count }}</strong></article>
-    <article><span>Do akceptacji</span><strong>{{ pending_count }}</strong></article>
-    <article><span>Zaakceptowane</span><strong>{{ accepted_count }}</strong></article>
-    <article><span>Gotowe do wysłania</span><strong>{{ ready_count }}</strong></article>
+    <a href="{{ root_path }}/complaints/drafts"><article><span>Nowe reklamacje</span><strong>{{ draft_count }}</strong></article></a>
+    <a href="{{ root_path }}/complaints/pending"><article><span>Do akceptacji</span><strong>{{ pending_count }}</strong></article></a>
+    <a href="{{ root_path }}/complaints/accepted"><article><span>W toku</span><strong>{{ accepted_count }}</strong></article></a>
+    <a href="{{ root_path }}/complaints/ready"><article><span>Gotowe do wysłania</span><strong>{{ ready_count }}</strong></article></a>
+    <a href="{{ root_path }}/complaints/sent"><article><span>Wysłane</span><strong>{{ sent_count }}</strong></article></a>
+    <a href="{{ root_path }}/complaints/closed"><article><span>Zamknięte</span><strong>{{ closed_count }}</strong></article></a>
   </section>
+
+  {% if whatsapp_failed or email_failed %}
+    <section class="notice warning">
+      <strong>Wymaga uwagi:</strong>
+      {% if whatsapp_failed %} WhatsApp: {{ whatsapp_failed }} błędów.{% endif %}
+      {% if email_failed %} E-mail: {{ email_failed }} błędów/niepewnych wysyłek.{% endif %}
+    </section>
+  {% endif %}
+
   <section class="panel">
-    <h2>Stan Etapu 4</h2>
-    <p>Po akceptacji system przygotowuje kontrolowany szkic reklamacji dla przypisanego dostawcy wraz z wybranymi zdjęciami.</p>
-    <div class="checklist">
-      <span>✓ Numer po akceptacji</span><span>✓ Kartoteka dostawców</span><span>✓ Szkic e-mail</span><span>✓ Załączniki</span>
+    <div class="section-heading"><div><p class="eyebrow">Ostatnia aktywność</p><h2>Ostatnie reklamacje</h2></div><span class="badge">{{ message_count }} wiad. · {{ attachment_count }} zdj.</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Reklamacja</th><th>Status</th><th>Decyzja</th><th>Dostawca</th><th>Aktualizacja</th></tr></thead>
+        <tbody>
+          {% for complaint in recent_complaints %}
+            <tr>
+              <td><a class="draft-link" href="{{ root_path }}/drafts/{{ complaint.id }}">{{ complaint_display_name(complaint) }}</a>{% if complaint.official_number %}<br><span class="muted">{{ complaint.official_number }}</span>{% endif %}</td>
+              <td>{{ complaint.status.value }}</td>
+              <td>{{ business_decisions.get(complaint.resolution_strategy, {}).get('label', complaint.resolution_strategy) if complaint.resolution_strategy else '—' }}</td>
+              <td>{{ complaint.supplier.name if complaint.supplier else '—' }}</td>
+              <td>{{ complaint.updated_at.strftime('%d.%m.%Y %H:%M') if complaint.updated_at else '—' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5">Brak reklamacji.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </section>
 {% endblock %}

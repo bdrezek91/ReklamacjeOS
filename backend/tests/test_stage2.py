@@ -69,7 +69,8 @@ def test_groups_by_author_window_and_quoted_message(tmp_path):
 
     draft_list = client.get("/complaints/drafts")
     assert draft_list.status_code == 200
-    assert "DRAFT-0001" in draft_list.text
+    assert "Reklamacja 0001" in draft_list.text
+    assert "DRAFT-0001" not in draft_list.text
     draft_detail = client.get(f"/drafts/{first.json()['complaint_id']}")
     assert draft_detail.status_code == 200
     assert "panel-test-token" in draft_detail.text
@@ -159,8 +160,10 @@ def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_pat
     session.commit()
 
     detail_before = client.get(f"/drafts/{complaint.id}")
-    assert "Wykorzystać na 1 gatunek w następnych pawilonach." in detail_before.text
-    assert "Zwracamy do producenta." in detail_before.text
+    assert "Wykorzystać jako I gatunek w innym pawilonie" in detail_before.text
+    assert "Zwrot do Paneltech" in detail_before.text
+    assert "Zostawić płyty i negocjować rabat" in detail_before.text
+    assert "II gatunek – rabat 50%" in detail_before.text
 
     queued = client.post(
         f"/drafts/{complaint.id}/whatsapp-resolution",
@@ -178,7 +181,7 @@ def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_pat
         select(WhatsAppOutbox).where(WhatsAppOutbox.complaint_id == complaint.id).order_by(WhatsAppOutbox.id)
     ).all()
     assert complaint.whatsapp_resolution == "use_first_grade_next_pavilions"
-    assert complaint.status == ComplaintStatus.CLOSED
+    assert complaint.status == ComplaintStatus.ACCEPTED
     assert len(outboxes) == 2
     assert outboxes[0].message_kind == "acceptance"
     assert outboxes[1].message_kind == "resolution"
@@ -188,7 +191,7 @@ def test_queues_whatsapp_resolution_without_replacing_acceptance_message(tmp_pat
     detail = client.get(f"/drafts/{complaint.id}")
     assert detail.status_code == 200
     assert "Nadaj status i wyślij na WhatsApp" not in detail.text
-    assert "Wykorzystać na 1 gatunek" in detail.text
+    assert "Wykorzystać jako I gatunek" in detail.text
 
     duplicate = client.post(
         f"/drafts/{complaint.id}/whatsapp-resolution",
@@ -262,7 +265,17 @@ def test_updates_card_gallery_and_status_with_audit(tmp_path):
     assert complaint.approved_data["material_product"] == "Płyta X"
     assert complaint.status == ComplaintStatus.ACCEPTED
     assert session.get(Attachment, attachment.id).include_in_email is True
-    assert len(session.scalars(select(ComplaintField)).all()) == 6
+    manual_fields = session.scalars(select(ComplaintField).where(ComplaintField.source == "manual")).all()
+    manual_field_names = {field.field_name for field in manual_fields}
+    expected_manual_fields = {
+        "material_product",
+        "quantity",
+        "defect_description",
+        "document_number",
+        "customer_project",
+        "notes",
+    }
+    assert expected_manual_fields <= manual_field_names
     event_types = set(session.scalars(select(ComplaintEvent.event_type)).all())
     assert {"complaint_accepted", "complaint_card_updated", "status_changed"} <= event_types
 

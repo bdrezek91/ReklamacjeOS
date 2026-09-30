@@ -12,7 +12,9 @@ from sqlalchemy import select
 
 from .config import settings
 from .db import SessionLocal
-from .models import Attachment, ComplaintEvent, OcrResult, WhatsAppMessage
+from .models import Attachment, Complaint, ComplaintEvent, OcrResult, WhatsAppMessage
+from .services.correspondence import auto_prepare_supplier_workflow
+from .services.intake import extract_fields_from_text, merge_extracted_fields
 from .services.ocr import MAX_OCR_TEXT_LENGTH
 
 RUNNING = True
@@ -128,6 +130,17 @@ def process_one(result_id: int) -> None:
             result.completed_at = datetime.now().astimezone()
             result.last_error = None
             if message and message.complaint_id:
+                complaint = db.get(Complaint, message.complaint_id)
+                if complaint is not None and text.strip():
+                    merge_extracted_fields(
+                        db,
+                        complaint,
+                        extract_fields_from_text(text),
+                        source="ocr",
+                        confidence=int(max(0, min(100, confidence if confidence is not None else 60))),
+                    )
+                    db.flush()
+                    auto_prepare_supplier_workflow(db, complaint, actor="system:ocr")
                 db.add(
                     ComplaintEvent(
                         complaint_id=message.complaint_id,

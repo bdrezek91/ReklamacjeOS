@@ -1,17 +1,23 @@
 {% extends "base.html" %}
-{% block title %}{{ complaint.official_number or complaint.draft_number }} · ReklamacjeOS{% endblock %}
+{% block title %}{{ complaint_display_name(complaint) }} · ReklamacjeOS{% endblock %}
 {% block content %}
-  <div class="page-heading">
+  <section class="case-hero">
     <div>
       <p class="eyebrow">Karta reklamacji</p>
-      <h1>{{ complaint.official_number or complaint.draft_number }}</h1>
-      <p class="technical-number">Numer techniczny: {{ complaint.draft_number }}</p>
+      <h1 class="case-title">{{ complaint_display_name(complaint) }}</h1>
+      <p class="case-subtitle">
+        {% if complaint.official_number %}Numer reklamacyjny: <strong>{{ complaint.official_number }}</strong>{% else %}Numer reklamacyjny zostanie nadany przy akceptacji{% endif %}
+      </p>
     </div>
-    <div class="heading-badges">
-      <span class="badge">{{ status_label }}</span>
-      <span class="badge">{{ messages|length }} wiad. · {{ attachment_count }} zdj.</span>
+    <div class="case-meta">
+      <span class="badge success">{{ status_label }}</span>
+      <span class="badge">{{ messages|length }} wiad.</span>
+      <span class="badge">{{ attachment_count }} zdj.</span>
+      {% if complaint.resolution_strategy and business_decisions.get(complaint.resolution_strategy) %}
+        <span class="badge">{{ business_decisions.get(complaint.resolution_strategy).label }}</span>
+      {% endif %}
     </div>
-  </div>
+  </section>
 
   {% if complaint.merged_into %}
     <section class="notice warning">
@@ -19,6 +25,62 @@
       <a href="{{ root_path }}/drafts/{{ complaint.merged_into.id }}">{{ complaint.merged_into.official_number or complaint.merged_into.draft_number }}</a>.
     </section>
   {% else %}
+    <section class="panel decision-panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Decyzja biznesowa</p>
+          <h2>Co robimy z reklamowanymi płytami?</h2>
+        </div>
+      </div>
+      <div class="decision-grid">
+        {% for key, decision in business_decisions.items() %}
+          <article class="decision-card {{ 'selected' if complaint.resolution_strategy == key else '' }}">
+            <h3>{{ decision.label }}</h3>
+            <p>{{ decision.description }}</p>
+            {% if complaint.status.value in ['draft', 'pending_approval', 'accepted'] %}
+              <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/decision">
+                <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+                <input type="hidden" name="strategy" value="{{ key }}">
+                {% if key == 'keep_request_discount' %}
+                  <label class="decision-discount">Oczekiwany rabat
+                    <input type="number" name="discount_percent" min="1" max="100" value="{{ complaint.resolution_discount_percent or '' }}" placeholder="%">
+                  </label>
+                {% endif %}
+                <button class="button {{ 'secondary' if complaint.resolution_strategy == key else '' }}" type="submit">
+                  {{ 'Wybrano' if complaint.resolution_strategy == key else 'Wybierz tę ścieżkę' }}
+                </button>
+              </form>
+            {% elif complaint.resolution_strategy == key %}
+              <span class="badge success">Wybrana ścieżka</span>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="completeness {{ 'missing' if missing_fields else 'ok' }}">
+      <div>
+        <strong>{{ 'Brakuje danych do dalszej obsługi' if missing_fields else 'Dane podstawowe są kompletne' }}</strong>
+        <p>
+          {% if missing_fields %}
+            System przygotował jedno zbiorcze pytanie na WhatsApp. Po uzupełnieniu danych karta zostanie automatycznie zasilona.
+          {% elif complaint.resolution_strategy in ['return_to_supplier', 'keep_request_discount', 'second_grade_50'] %}
+            Dla ścieżki z Paneltechem szkic e-maila może zostać przygotowany automatycznie.
+          {% else %}
+            Reklamacja jest gotowa do dalszej decyzji.
+          {% endif %}
+        </p>
+        {% if missing_data_outbox %}
+          <p class="muted">Pytanie WhatsApp: {{ 'wysłane' if missing_data_outbox.status == 'sent' else 'oczekuje na wysłanie' if missing_data_outbox.status == 'pending' else missing_data_outbox.status }}</p>
+        {% endif %}
+      </div>
+      {% if missing_fields %}
+        <div class="missing-chips">
+          {% for field in missing_fields %}<span>{{ missing_field_labels.get(field, field) }}</span>{% endfor %}
+        </div>
+      {% endif %}
+    </section>
+
     <section class="panel complaint-card-form">
       <div class="section-heading">
         <div><p class="eyebrow">Dane zatwierdzone</p><h2>Karta reklamacji</h2></div>
@@ -150,7 +212,7 @@
       <section class="notice">Dostawca: <strong>{{ complaint.supplier.name }}</strong> · {{ complaint.supplier.email }}</section>
     {% endif %}
 
-    {% if complaint.whatsapp_resolution or complaint.status.value in ['accepted', 'ready_to_send', 'sent'] %}
+    {% if false and (complaint.whatsapp_resolution or complaint.status.value in ['accepted', 'ready_to_send', 'sent']) %}
       <section class="panel correspondence-panel">
         <div class="section-heading">
           <div><p class="eyebrow">Decyzja dla grupy</p><h2>Status WhatsApp</h2></div>
@@ -186,14 +248,20 @@
       </section>
     {% endif %}
 
-    {% if complaint.status.value == 'accepted' %}
+    {% if complaint.status.value == 'accepted' and complaint.resolution_strategy in ['return_to_supplier', 'keep_request_discount', 'second_grade_50'] %}
       <section class="panel correspondence-panel">
-        <h2>Reklamacja do dostawcy</h2>
-        <p class="muted">System przygotuje edytowalny szkic z wybranymi wyżej zdjęciami. Nic nie zostanie wysłane automatycznie.</p>
-        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/prepare-email">
-          <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-          <button class="button" type="submit" {% if not complaint.supplier %}disabled{% endif %}>Przygotuj szkic wiadomości</button>
-        </form>
+        <h2>Reklamacja do Paneltech</h2>
+        {% if missing_fields %}
+          <p class="muted">Czekamy na brakujące dane z WhatsApp. Po ich uzupełnieniu szkic wiadomości powstanie automatycznie.</p>
+        {% elif not complaint.supplier %}
+          <p class="muted">Dane są kompletne. Przypisz dostawcę Paneltech, aby system przygotował szkic automatycznie.</p>
+        {% else %}
+          <p class="muted">Dane są kompletne. Jeżeli automatyczny szkic nie powstał, możesz przygotować go ręcznie.</p>
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/prepare-email">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="button secondary" type="submit">Przygotuj szkic ręcznie</button>
+          </form>
+        {% endif %}
       </section>
     {% endif %}
 
@@ -269,7 +337,7 @@
       <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/status">
         <input type="hidden" name="action_token" value="{{ panel_action_token }}">
         <input type="hidden" name="target_status" value="draft">
-        <button class="button secondary" type="submit">Cofnij do draftu</button>
+        <button class="button secondary" type="submit">Cofnij do nowych</button>
       </form>
     {% endif %}
 
@@ -288,16 +356,16 @@
     {% if complaint.status.value == 'draft' %}
     <section class="panel draft-actions">
       <div>
-        <h2>Scal cały draft</h2>
+        <h2>Scal całą reklamację</h2>
         {% if targets %}
           <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/merge" onsubmit="return confirm('Przenieść wszystkie wiadomości do wybranego draftu?')">
             <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-            <label>Draft docelowy
+            <label>Reklamacja docelowa
               <select name="target_complaint_id" required>
-                {% for target in targets %}<option value="{{ target.id }}">{{ target.official_number or target.draft_number }}</option>{% endfor %}
+                {% for target in targets %}<option value="{{ target.id }}">{{ complaint_display_name(target) }}{% if target.official_number %} · {{ target.official_number }}{% endif %}</option>{% endfor %}
               </select>
             </label>
-            <button class="button danger" type="submit">Scal drafty</button>
+            <button class="button danger" type="submit">Scal reklamacje</button>
           </form>
         {% else %}
           <p class="muted">Brak innego aktywnego draftu.</p>
@@ -305,7 +373,7 @@
       </div>
       <div>
         <h2>Rozdziel wiadomości</h2>
-        <p class="muted">Zaznacz wiadomości poniżej. Powstanie z nich nowy draft, a oryginały i zdjęcia pozostaną bez zmian.</p>
+        <p class="muted">Zaznacz wiadomości poniżej. Powstanie z nich nowa reklamacja, a oryginały i zdjęcia pozostaną bez zmian.</p>
       </div>
     </section>
     {% endif %}

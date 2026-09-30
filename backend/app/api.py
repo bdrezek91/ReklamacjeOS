@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session, selectinload
 from .config import settings
 from .db import get_db
 from .models import Attachment, Complaint, ComplaintEvent, WhatsAppMessage, WhatsAppOutbox
-from .services.grouping import assign_message_to_draft
+from .services.correspondence import auto_prepare_supplier_workflow
+from .services.grouping import DraftOperationError, assign_message_to_draft
+from .services.intake import extract_fields_from_text, merge_extracted_fields
+from .services.ocr import SUPPORTED_IMAGE_TYPES, queue_complaint_ocr
 from .services.storage import store_original_media
 
 router = APIRouter()
@@ -65,7 +68,10 @@ def mark_whatsapp_outbox_sent(
     db.add(
         ComplaintEvent(
             complaint_id=item.complaint_id,
-            event_type=("whatsapp_resolution_sent" if item.message_kind == "resolution" else "whatsapp_number_sent"),
+            event_type={
+                "resolution": "whatsapp_resolution_sent",
+                "missing_data": "whatsapp_missing_data_sent",
+            }.get(item.message_kind, "whatsapp_number_sent"),
             actor="whatsapp-bridge",
             details={"outbox_id": item.id, "wa_message_id": wa_message_id},
         )
@@ -91,9 +97,10 @@ def mark_whatsapp_outbox_failed(
     db.add(
         ComplaintEvent(
             complaint_id=item.complaint_id,
-            event_type=(
-                "whatsapp_resolution_failed" if item.message_kind == "resolution" else "whatsapp_number_failed"
-            ),
+            event_type={
+                "resolution": "whatsapp_resolution_failed",
+                "missing_data": "whatsapp_missing_data_failed",
+            }.get(item.message_kind, "whatsapp_number_failed"),
             actor="whatsapp-bridge",
             details={"outbox_id": item.id, "error": item.last_error},
         )
@@ -168,8 +175,10 @@ async def ingest_whatsapp_message(
 
     try:
         db.flush()
+        stored_mime_type: str | None = None
         if media is not None:
             stored = await store_original_media(media, wa_message_id, source_timestamp)
+            stored_mime_type = stored.mime_type
             db.add(
                 Attachment(
                     whatsapp_message_id=message.id,
@@ -182,6 +191,20 @@ async def ingest_whatsapp_message(
                 )
             )
         complaint, grouping_rule = assign_message_to_draft(db, message)
+        merge_extracted_fields(
+            db,
+            complaint,
+            extract_fields_from_text(body),
+            source="whatsapp_text",
+            confidence=85,
+        )
+        db.flush()
+        if stored_mime_type in SUPPORTED_IMAGE_TYPES:
+            try:
+                queue_complaint_ocr(db, complaint.id, actor="system:intake")
+            except DraftOperationError:
+                pass
+        auto_prepare_supplier_workflow(db, complaint, actor="system:intake")
         db.commit()
     except IntegrityError:
         db.rollback()

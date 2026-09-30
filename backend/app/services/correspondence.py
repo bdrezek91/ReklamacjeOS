@@ -15,7 +15,9 @@ from ..models import (
     Supplier,
     WhatsAppMessage,
 )
+from .complaints import BUSINESS_DECISIONS
 from .grouping import DraftOperationError
+from .intake import missing_required_fields
 
 
 def validate_email(value: str) -> str:
@@ -78,6 +80,7 @@ def assign_supplier(db: Session, complaint_id: int, supplier_id: int, *, actor: 
 
     previous_id = complaint.supplier_id
     complaint.supplier_id = supplier.id
+    complaint.supplier = supplier
     complaint.updated_at = func.now()
     draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
     if draft is not None:
@@ -106,18 +109,41 @@ def default_body(complaint: Complaint) -> str:
     fields = (
         ("Materiał / produkt", data.get("material_product", "")),
         ("Ilość", data.get("quantity", "")),
+        ("Wymiary", data.get("dimensions", "")),
         ("Opis wady", data.get("defect_description", "")),
-        ("Numer zamówienia lub faktury", data.get("document_number", "")),
+        ("Nr zamówienia Paneltech", data.get("paneltech_order_number", "")),
+        ("Nr paczki", data.get("package_number", "")),
+        ("Numer dokumentu", data.get("document_number", "")),
         ("Klient / projekt", data.get("customer_project", "")),
         ("Uwagi", data.get("notes", "")),
     )
     details = "\n".join(f"{label}: {value}" for label, value in fields if str(value).strip())
+    strategy = complaint.resolution_strategy
+    discount = complaint.resolution_discount_percent
+    if strategy == "return_to_supplier":
+        request = (
+            "Prosimy o potwierdzenie przyjęcia reklamacji oraz informację dotyczącą organizacji zwrotu "
+            "i dalszego sposobu rozliczenia reklamowanych płyt."
+        )
+    elif strategy == "keep_request_discount":
+        discount_text = f" w wysokości {discount}%" if discount else ""
+        request = (
+            "Płyty możemy pozostawić i wykorzystać po uzgodnieniu odpowiedniej korekty ceny. "
+            f"Prosimy o propozycję rabatu{discount_text} i potwierdzenie sposobu rozliczenia."
+        )
+    elif strategy == "second_grade_50":
+        request = (
+            "Płyty możemy przyjąć jako II gatunek i pozostawić u nas pod warunkiem rozliczenia "
+            "z rabatem 50%. Prosimy o potwierdzenie takiego rozwiązania i wystawienie odpowiedniej korekty."
+        )
+    else:
+        request = "Prosimy o potwierdzenie przyjęcia reklamacji i informację o dalszym sposobie postępowania."
     attachment_note = "\n\nW załączeniu przesyłamy dokumentację fotograficzną."
     return (
         "Dzień dobry,\n\n"
         f"zgłaszamy reklamację nr {complaint.official_number}.\n\n"
         f"{details}{attachment_note}\n\n"
-        "Prosimy o potwierdzenie przyjęcia reklamacji i informację o dalszym sposobie postępowania.\n\n"
+        f"{request}\n\n"
         "Pozdrawiamy"
     )
 
@@ -152,6 +178,29 @@ def prepare_email_draft(db: Session, complaint_id: int, *, actor: str) -> EmailD
     )
     db.flush()
     return draft
+
+
+def auto_prepare_supplier_workflow(
+    db: Session,
+    complaint: Complaint,
+    *,
+    actor: str = "system",
+) -> EmailDraft | None:
+    decision = BUSINESS_DECISIONS.get(complaint.resolution_strategy or "")
+    if not decision or not decision["requires_supplier"]:
+        return None
+    if complaint.status != ComplaintStatus.ACCEPTED or missing_required_fields(complaint):
+        return None
+    if complaint.supplier is None:
+        matches = db.scalars(
+            select(Supplier).where(Supplier.active.is_(True), Supplier.name.ilike("%paneltech%"))
+        ).all()
+        if len(matches) == 1:
+            assign_supplier(db, complaint.id, matches[0].id, actor=actor)
+            db.flush()
+    if complaint.supplier is None:
+        return None
+    return prepare_email_draft(db, complaint.id, actor=actor)
 
 
 def update_email_draft(

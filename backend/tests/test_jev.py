@@ -49,15 +49,12 @@ def test_jev_analysis_records_typed_results_without_changing_complaint(tmp_path)
     complaint = session.get(Complaint, complaint_id)
     original_status = complaint.status
     attachment = session.scalar(select(Attachment))
-    session.add(
-        OcrResult(
-            attachment_id=attachment.id,
-            status="completed",
-            raw_text="niepoprawny odczyt",
-            corrected_text="Panel ZS-3128, 4 sztuki",
-            confidence=88.5,
-        )
-    )
+    ocr_result = session.scalar(select(OcrResult).where(OcrResult.attachment_id == attachment.id))
+    assert ocr_result is not None
+    ocr_result.status = "completed"
+    ocr_result.raw_text = "niepoprawny odczyt"
+    ocr_result.corrected_text = "Panel ZS-3128, 4 sztuki"
+    ocr_result.confidence = 88.5
     session.commit()
     fake_client = FakeClient()
 

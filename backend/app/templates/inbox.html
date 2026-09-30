@@ -12,7 +12,7 @@
           <div class="message-meta">
             <strong>{{ message.author_name or message.author_id or 'Nieznany autor' }}</strong>
             <div class="message-meta-right">
-              {% if message.complaint %}<a class="draft-link" href="{{ root_path }}/drafts/{{ message.complaint.id }}">{{ message.complaint.official_number or message.complaint.draft_number }}</a>{% endif %}
+              {% if message.complaint %}<a class="draft-link" href="{{ root_path }}/drafts/{{ message.complaint.id }}">{{ complaint_display_name(message.complaint) }}</a>{% endif %}
               <time datetime="{{ message.source_timestamp.isoformat() }}">{{ message.source_timestamp.strftime('%d.%m.%Y %H:%M:%S') }}</time>
             </div>
           </div>
@@ -32,6 +32,6 @@
       {% endfor %}
     </section>
   {% else %}
-    <section class="empty-state"><h2>Brak wiadomości</h2><p>Nowe wpisy z wybranej grupy WhatsApp pojawią się tutaj i zostaną przypisane do draftów.</p></section>
+    <section class="empty-state"><h2>Brak wiadomości</h2><p>Nowe wpisy z wybranej grupy WhatsApp pojawią się tutaj i zostaną przypisane do reklamacji.</p></section>
   {% endif %}
 {% endblock %}

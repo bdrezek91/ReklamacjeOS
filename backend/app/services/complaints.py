@@ -21,13 +21,42 @@ from .grouping import DraftOperationError
 CARD_FIELDS = (
     "material_product",
     "quantity",
+    "dimensions",
     "defect_description",
+    "paneltech_order_number",
+    "package_number",
     "document_number",
     "customer_project",
     "notes",
 )
 
 WARSAW = ZoneInfo("Europe/Warsaw")
+BUSINESS_DECISIONS = {
+    "reuse_first_grade": {
+        "label": "Wykorzystać jako I gatunek w innym pawilonie",
+        "description": "Płyty zostają u nas i traktujemy je jako pełnowartościowe do innego zastosowania.",
+        "requires_supplier": False,
+        "default_discount": None,
+    },
+    "return_to_supplier": {
+        "label": "Zwrot do Paneltech",
+        "description": "Reklamacja do producenta z opisem, zdjęciami i przygotowaniem zwrotu płyt.",
+        "requires_supplier": True,
+        "default_discount": None,
+    },
+    "keep_request_discount": {
+        "label": "Zostawić płyty i negocjować rabat",
+        "description": "Płyty możemy wykorzystać, ale oczekujemy uzgodnionego rabatu / korekty ceny.",
+        "requires_supplier": True,
+        "default_discount": None,
+    },
+    "second_grade_50": {
+        "label": "II gatunek – rabat 50%",
+        "description": "Płyty zostają jako II gatunek; proponujemy rozliczenie z rabatem 50%.",
+        "requires_supplier": True,
+        "default_discount": 50,
+    },
+}
 WHATSAPP_RESOLUTIONS = {
     "use_first_grade_next_pavilions": "Wykorzystać na 1 gatunek w następnych pawilonach.",
     "return_to_manufacturer": "Zwracamy do producenta.",
@@ -47,6 +76,48 @@ def _editable_complaint(db: Session, complaint_id: int) -> Complaint:
         ComplaintStatus.READY_TO_SEND,
     }:
         raise DraftOperationError("Reklamacja w tym statusie nie może być edytowana")
+    return complaint
+
+
+def set_resolution_strategy(
+    db: Session,
+    complaint_id: int,
+    strategy: str,
+    *,
+    discount_percent: int | None,
+    actor: str,
+) -> Complaint:
+    complaint = _editable_complaint(db, complaint_id)
+    if complaint.status == ComplaintStatus.READY_TO_SEND:
+        raise DraftOperationError("Decyzji nie można zmienić po przygotowaniu wiadomości do dostawcy")
+    config = BUSINESS_DECISIONS.get(strategy)
+    if config is None:
+        raise DraftOperationError("Nieznana decyzja dla reklamacji")
+
+    if config["default_discount"] is not None:
+        discount_percent = int(config["default_discount"])
+    elif strategy != "keep_request_discount":
+        discount_percent = None
+    if discount_percent is not None and not 1 <= discount_percent <= 100:
+        raise DraftOperationError("Rabat musi mieścić się w zakresie 1–100%")
+
+    previous = complaint.resolution_strategy
+    complaint.resolution_strategy = strategy
+    complaint.resolution_discount_percent = discount_percent
+    complaint.resolution_decided_at = datetime.now(WARSAW)
+    complaint.updated_at = func.now()
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint.id,
+            event_type="resolution_strategy_selected",
+            actor=actor,
+            details={
+                "from": previous,
+                "to": strategy,
+                "discount_percent": discount_percent,
+            },
+        )
+    )
     return complaint
 
 
@@ -253,9 +324,7 @@ def enqueue_whatsapp_resolution(
     if existing is not None:
         raise DraftOperationError("Decyzja WhatsApp dla tej reklamacji została już zlecona")
 
-    previous_status = complaint.status
     complaint.whatsapp_resolution = resolution
-    complaint.status = ComplaintStatus.CLOSED
     complaint.updated_at = func.now()
     item = WhatsAppOutbox(
         complaint_id=complaint.id,
@@ -271,18 +340,6 @@ def enqueue_whatsapp_resolution(
             event_type="whatsapp_resolution_queued",
             actor=actor,
             details={"resolution": resolution},
-        )
-    )
-    db.add(
-        ComplaintEvent(
-            complaint_id=complaint.id,
-            event_type="status_changed",
-            actor=actor,
-            details={
-                "from": previous_status.value,
-                "to": ComplaintStatus.CLOSED.value,
-                "reason": "whatsapp_resolution",
-            },
         )
     )
     db.flush()

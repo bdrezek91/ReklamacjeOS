@@ -24,15 +24,18 @@ from .models import (
     WhatsAppOutbox,
 )
 from .services.complaints import (
+    BUSINESS_DECISIONS,
     WHATSAPP_RESOLUTIONS,
     accept_complaint,
     change_complaint_status,
     enqueue_whatsapp_resolution,
     retry_whatsapp_notification,
+    set_resolution_strategy,
     update_complaint_card,
 )
 from .services.correspondence import (
     assign_supplier,
+    auto_prepare_supplier_workflow,
     enqueue_smtp_email,
     mark_manually_sent,
     prepare_email_draft,
@@ -42,6 +45,13 @@ from .services.correspondence import (
     update_email_draft,
 )
 from .services.grouping import DraftOperationError, merge_drafts, split_draft
+from .services.intake import (
+    FIELD_LABELS,
+    ensure_missing_data_question,
+    extract_fields_from_text,
+    merge_extracted_fields,
+    missing_required_fields,
+)
 from .services.jev import analyze_complaint_with_jev, answer_rows
 from .services.ocr import SUPPORTED_IMAGE_TYPES, queue_complaint_ocr, save_corrected_ocr_text
 
@@ -52,6 +62,14 @@ app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["root_path"] = settings.root_path
+
+
+def complaint_display_name(complaint: Complaint) -> str:
+    return f"Reklamacja {complaint.id:04d}"
+
+
+templates.env.globals["complaint_display_name"] = complaint_display_name
+templates.env.globals["business_decisions"] = BUSINESS_DECISIONS
 
 
 def verify_panel_action_token(action_token: str) -> None:
@@ -69,6 +87,19 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     message_count = db.scalar(select(func.count()).select_from(WhatsAppMessage)) or 0
     attachment_count = db.scalar(select(func.count()).select_from(Attachment)) or 0
     status_counts = dict(db.execute(select(Complaint.status, func.count()).group_by(Complaint.status)).all())
+    recent_complaints = db.scalars(
+        select(Complaint)
+        .options(selectinload(Complaint.supplier))
+        .where(Complaint.merged_into_id.is_(None))
+        .order_by(Complaint.updated_at.desc(), Complaint.id.desc())
+        .limit(8)
+    ).all()
+    whatsapp_failed = db.scalar(
+        select(func.count()).select_from(WhatsAppOutbox).where(WhatsAppOutbox.status == "failed")
+    ) or 0
+    email_failed = db.scalar(
+        select(func.count()).select_from(EmailOutbox).where(EmailOutbox.status.in_({"failed", "unknown"}))
+    ) or 0
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -81,6 +112,10 @@ def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
             "accepted_count": status_counts.get(ComplaintStatus.ACCEPTED, 0),
             "ready_count": status_counts.get(ComplaintStatus.READY_TO_SEND, 0),
             "sent_count": status_counts.get(ComplaintStatus.SENT, 0),
+            "closed_count": status_counts.get(ComplaintStatus.CLOSED, 0),
+            "recent_complaints": recent_complaints,
+            "whatsapp_failed": whatsapp_failed,
+            "email_failed": email_failed,
         },
     )
 
@@ -109,14 +144,14 @@ def complaints_by_status(
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     mappings = {
-        "drafts": (ComplaintStatus.DRAFT, "Drafty"),
+        "drafts": (ComplaintStatus.DRAFT, "Nowe reklamacje"),
         "pending": (ComplaintStatus.PENDING_APPROVAL, "Do akceptacji"),
         "accepted": (ComplaintStatus.ACCEPTED, "Zaakceptowane"),
         "ready": (ComplaintStatus.READY_TO_SEND, "Gotowe do wysłania"),
         "sent": (ComplaintStatus.SENT, "Wysłane"),
         "closed": (ComplaintStatus.CLOSED, "Zamknięte"),
     }
-    status_value, title = mappings.get(status_name, (ComplaintStatus.DRAFT, "Drafty"))
+    status_value, title = mappings.get(status_name, (ComplaintStatus.DRAFT, "Nowe reklamacje"))
     query = (
         select(Complaint)
         .outerjoin(Supplier)
@@ -198,6 +233,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     ).all()
     acceptance_outbox = next((item for item in outboxes if item.message_kind == "acceptance"), None)
     resolution_outbox = next((item for item in outboxes if item.message_kind == "resolution"), None)
+    missing_data_outbox = next((item for item in outboxes if item.message_kind == "missing_data"), None)
     email_draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
     email_outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id))
     suppliers = db.scalars(select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)).all()
@@ -225,7 +261,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "ocr_queueable_count": ocr_queueable_count,
             "card_data": complaint.approved_data or {},
             "status_label": {
-                ComplaintStatus.DRAFT: "Draft",
+                ComplaintStatus.DRAFT: "Nowa",
                 ComplaintStatus.PENDING_APPROVAL: "Do akceptacji",
                 ComplaintStatus.ACCEPTED: "Zaakceptowana",
                 ComplaintStatus.READY_TO_SEND: "Gotowa do wysłania",
@@ -234,16 +270,23 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             }[complaint.status],
             "card_fields": (
                 ("material_product", "Materiał / produkt"),
-                ("quantity", "Ilość"),
+                ("quantity", "Ilość sztuk"),
+                ("dimensions", "Wymiary płyt"),
                 ("defect_description", "Opis wady"),
-                ("document_number", "Numer zamówienia lub faktury"),
+                ("paneltech_order_number", "Nr zamówienia Paneltech"),
+                ("package_number", "Nr paczki"),
+                ("document_number", "Nr dokumentu / WZ / faktury"),
                 ("customer_project", "Klient / projekt"),
                 ("notes", "Uwagi"),
             ),
             "panel_action_token": settings.panel_action_token,
             "acceptance_outbox": acceptance_outbox,
             "resolution_outbox": resolution_outbox,
+            "missing_data_outbox": missing_data_outbox,
             "whatsapp_resolutions": WHATSAPP_RESOLUTIONS,
+            "business_decisions": BUSINESS_DECISIONS,
+            "missing_fields": missing_required_fields(complaint),
+            "missing_field_labels": FIELD_LABELS,
             "email_draft": email_draft,
             "email_outbox": email_outbox,
             "smtp_configured": settings.smtp_configured,
@@ -309,6 +352,17 @@ def save_ocr_action(
             corrected_text,
             actor="panel",
         )
+        complaint = db.get(Complaint, complaint_id)
+        if complaint is not None:
+            merge_extracted_fields(
+                db,
+                complaint,
+                extract_fields_from_text(corrected_text),
+                source="ocr_review",
+                confidence=100,
+            )
+            db.flush()
+            auto_prepare_supplier_workflow(db, complaint, actor="system:ocr-review")
         db.commit()
     except DraftOperationError as error:
         db.rollback()
@@ -339,7 +393,10 @@ def update_complaint_card_action(
     action_token: str = Form(...),
     material_product: str = Form(default=""),
     quantity: str = Form(default=""),
+    dimensions: str = Form(default=""),
     defect_description: str = Form(default=""),
+    paneltech_order_number: str = Form(default=""),
+    package_number: str = Form(default=""),
     document_number: str = Form(default=""),
     customer_project: str = Form(default=""),
     notes: str = Form(default=""),
@@ -348,13 +405,16 @@ def update_complaint_card_action(
 ) -> RedirectResponse:
     verify_panel_action_token(action_token)
     try:
-        update_complaint_card(
+        complaint = update_complaint_card(
             db,
             complaint_id,
             values={
                 "material_product": material_product,
                 "quantity": quantity,
+                "dimensions": dimensions,
                 "defect_description": defect_description,
+                "paneltech_order_number": paneltech_order_number,
+                "package_number": package_number,
                 "document_number": document_number,
                 "customer_project": customer_project,
                 "notes": notes,
@@ -362,6 +422,35 @@ def update_complaint_card_action(
             included_attachment_ids=attachment_ids or [],
             actor="panel",
         )
+        db.flush()
+        auto_prepare_supplier_workflow(db, complaint, actor="system:card")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/decision")
+def set_resolution_strategy_action(
+    complaint_id: int,
+    strategy: str = Form(...),
+    discount_percent: int | None = Form(default=None),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        complaint = set_resolution_strategy(
+            db,
+            complaint_id,
+            strategy,
+            discount_percent=discount_percent,
+            actor="panel",
+        )
+        db.flush()
+        ensure_missing_data_question(db, complaint, group_id=settings.whatsapp_group_id)
+        auto_prepare_supplier_workflow(db, complaint, actor="system")
         db.commit()
     except DraftOperationError as error:
         db.rollback()
@@ -395,12 +484,14 @@ def accept_complaint_action(
 ) -> RedirectResponse:
     verify_panel_action_token(action_token)
     try:
-        accept_complaint(
+        complaint = accept_complaint(
             db,
             complaint_id,
             actor="panel",
             group_id=settings.whatsapp_group_id,
         )
+        db.flush()
+        auto_prepare_supplier_workflow(db, complaint, actor="system")
         db.commit()
     except DraftOperationError as error:
         db.rollback()
@@ -535,7 +626,9 @@ def assign_supplier_action(
 ) -> RedirectResponse:
     verify_panel_action_token(action_token)
     try:
-        assign_supplier(db, complaint_id, supplier_id, actor="panel")
+        complaint = assign_supplier(db, complaint_id, supplier_id, actor="panel")
+        db.flush()
+        auto_prepare_supplier_workflow(db, complaint)
         db.commit()
     except DraftOperationError as error:
         db.rollback()

@@ -6,20 +6,21 @@
   <title>{% block title %}ReklamacjeOS{% endblock %}</title>
   <link rel="stylesheet" href="{{ root_path }}/static/app.css">
   <link rel="stylesheet" href="{{ root_path }}/static/stage4.css">
+  <link rel="stylesheet" href="{{ root_path }}/static/theme_v2.css">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="{{ root_path }}/">Reklamacje<span>OS</span></a>
-    <span class="environment">Etap 5 · bezpieczna wysyłka</span>
+    <a class="brand" href="{{ root_path }}/"><span class="brand-dampol">DAMPOL</span><span class="brand-divider">/</span>ReklamacjeOS</a>
+    <span class="environment">OBSŁUGA REKLAMACJI PRODUKCYJNYCH</span>
   </header>
   <div class="layout">
     <nav class="sidebar" aria-label="Główna nawigacja">
-      <a class="{{ 'active' if active == 'dashboard' else '' }}" href="{{ root_path }}/">Dashboard</a>
-      <a class="{{ 'active' if active == 'inbox' else '' }}" href="{{ root_path }}/inbox">Nowe z WhatsApp</a>
-      <a class="{{ 'active' if active == 'drafts' else '' }}" href="{{ root_path }}/complaints/drafts">Drafty</a>
+      <a class="{{ 'active' if active == 'dashboard' else '' }}" href="{{ root_path }}/">Pulpit</a>
+      <a class="{{ 'active' if active == 'inbox' else '' }}" href="{{ root_path }}/inbox">WhatsApp</a>
+      <a class="{{ 'active' if active == 'drafts' else '' }}" href="{{ root_path }}/complaints/drafts">Nowe reklamacje</a>
       <a class="{{ 'active' if active == 'pending' else '' }}" href="{{ root_path }}/complaints/pending">Do akceptacji</a>
-      <a class="{{ 'active' if active == 'accepted' else '' }}" href="{{ root_path }}/complaints/accepted">Zaakceptowane</a>
-      <a class="{{ 'active' if active == 'ready' else '' }}" href="{{ root_path }}/complaints/ready">Gotowe do wysłania</a>
+      <a class="{{ 'active' if active == 'accepted' else '' }}" href="{{ root_path }}/complaints/accepted">W toku</a>
+      <a class="{{ 'active' if active == 'ready' else '' }}" href="{{ root_path }}/complaints/ready">Do wysłania</a>
       <a class="{{ 'active' if active == 'sent' else '' }}" href="{{ root_path }}/complaints/sent">Wysłane</a>
       <a class="{{ 'active' if active == 'closed' else '' }}" href="{{ root_path }}/complaints/closed">Zamknięte</a>
       <a class="{{ 'active' if active == 'suppliers' else '' }}" href="{{ root_path }}/suppliers">Dostawcy</a>

@@ -3,7 +3,7 @@
 {% block content %}
   <div class="page-heading"><div><p class="eyebrow">Reklamacje</p><h1>{{ title }}</h1></div></div>
   <form class="filter-bar" method="get">
-    <input name="q" value="{{ query }}" placeholder="Numer reklamacji, draft lub dostawca">
+    <input name="q" value="{{ query }}" placeholder="Numer reklamacji, numer Paneltech lub dostawca">
     <select name="supplier_id">
       <option value="">Wszyscy dostawcy</option>
       {% for supplier in suppliers %}<option value="{{ supplier.id }}" {% if selected_supplier_id == supplier.id %}selected{% endif %}>{{ supplier.name }}</option>{% endfor %}
@@ -18,10 +18,11 @@
         {% for message in ordered_messages %}{% set counts.attachments = counts.attachments + message.attachments|length %}{% endfor %}
         <article class="draft-card">
           <div class="draft-card-head">
-            <a href="{{ root_path }}/drafts/{{ complaint.id }}">{{ complaint.official_number or complaint.draft_number }}</a>
+            <a href="{{ root_path }}/drafts/{{ complaint.id }}">{{ complaint_display_name(complaint) }}</a>
             <span class="badge">{{ ordered_messages|length }} wiad. · {{ counts.attachments }} zdj.</span>
           </div>
-          <p class="technical-number">{{ complaint.draft_number }}</p>
+          {% if complaint.official_number %}<p><strong>{{ complaint.official_number }}</strong></p>{% endif %}
+          {% if complaint.resolution_strategy %}<p><strong>Decyzja:</strong> {{ business_decisions.get(complaint.resolution_strategy, {}).get('label', complaint.resolution_strategy) }}</p>{% endif %}
           {% if complaint.supplier %}<p><strong>Dostawca:</strong> {{ complaint.supplier.name }}</p>{% endif %}
           {% if ordered_messages %}
             <p class="draft-time">{{ ordered_messages[0].source_timestamp.strftime('%d.%m.%Y %H:%M') }} – {{ ordered_messages[-1].source_timestamp.strftime('%H:%M') }}</p>
@@ -33,6 +34,6 @@
       {% endfor %}
     </section>
   {% else %}
-    <section class="empty-state"><h2>Ta lista jest pusta</h2><p>Nowe wiadomości utworzą draft automatycznie.</p></section>
+    <section class="empty-state"><h2>Ta lista jest pusta</h2><p>Nowe zgłoszenia z WhatsApp utworzą reklamację automatycznie.</p></section>
   {% endif %}
 {% endblock %}

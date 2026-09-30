@@ -57,6 +57,9 @@ class Complaint(Base):
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True)
     status: Mapped[ComplaintStatus] = mapped_column(Enum(ComplaintStatus), default=ComplaintStatus.DRAFT)
     approved_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    resolution_strategy: Mapped[str | None] = mapped_column(String(64), index=True)
+    resolution_discount_percent: Mapped[int | None] = mapped_column(Integer)
+    resolution_decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     whatsapp_resolution: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -11,6 +11,7 @@ from ..models import (
     ComplaintEvent,
     ComplaintStatus,
     WhatsAppMessage,
+    WhatsAppOutbox,
 )
 
 
@@ -75,6 +76,14 @@ def assign_message_to_draft(
             complaint = _active_complaint(db, quoted.complaint_id)
             if complaint is not None:
                 rule = "quoted_message"
+        if complaint is None:
+            quoted_outbox = db.scalar(
+                select(WhatsAppOutbox).where(WhatsAppOutbox.wa_message_id == message.quoted_message_id)
+            )
+            if quoted_outbox is not None:
+                complaint = _active_complaint(db, quoted_outbox.complaint_id)
+                if complaint is not None:
+                    rule = "quoted_system_message"
 
     if complaint is None and message.author_id:
         cutoff = message.source_timestamp - timedelta(minutes=settings.grouping_window_minutes)
