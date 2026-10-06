@@ -3,7 +3,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .api import router as api_router
+from .auth import COOKIE_NAME, SESSION_TTL_SECONDS, auth_enabled, make_session, valid_session, verify_credentials
 from .config import settings
 from .db import get_db
 from .models import (
@@ -70,6 +71,65 @@ def complaint_display_name(complaint: Complaint) -> str:
 
 templates.env.globals["complaint_display_name"] = complaint_display_name
 templates.env.globals["business_decisions"] = BUSINESS_DECISIONS
+
+
+@app.middleware("http")
+async def browser_auth(request: Request, call_next):
+    path = request.url.path
+    if not auth_enabled():
+        return await call_next(request)
+    if (
+        path == "/health"
+        or path == "/login"
+        or path.startswith("/static/")
+        or path.startswith("/api/internal/whatsapp/")
+    ):
+        return await call_next(request)
+    if valid_session(request.cookies.get(COOKIE_NAME)):
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    return RedirectResponse(f"{settings.root_path}/login", status_code=303)
+
+
+@app.get("/login", response_class=HTMLResponse, response_model=None)
+def login_page(request: Request):
+    if valid_session(request.cookies.get(COOKIE_NAME)):
+        return RedirectResponse(f"{settings.root_path}/", status_code=303)
+    return templates.TemplateResponse(request=request, name="login.html", context={"error": None})
+
+
+@app.post("/login", response_model=None)
+def login_action(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    if not verify_credentials(username, password):
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"error": "Nieprawidłowy użytkownik lub hasło."},
+            status_code=401,
+        )
+    response = RedirectResponse(f"{settings.root_path}/", status_code=303)
+    response.set_cookie(
+        COOKIE_NAME,
+        make_session(settings.panel_user),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path=settings.root_path or "/",
+    )
+    return response
+
+
+@app.post("/logout")
+def logout_action() -> RedirectResponse:
+    response = RedirectResponse(f"{settings.root_path}/login", status_code=303)
+    response.delete_cookie(COOKIE_NAME, path=settings.root_path or "/")
+    return response
 
 
 def verify_panel_action_token(action_token: str) -> None:

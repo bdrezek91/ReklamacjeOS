@@ -108,3 +108,8 @@ th { color:#c9a227; font-size:12px; text-transform:uppercase; letter-spacing:.05
   .completeness { flex-direction:column; }
   .missing-chips { justify-content:flex-start; }
 }
+
+.topbar-right { display:flex; align-items:center; gap:16px; }
+.topbar-right form { margin:0; }
+.logout-button { background:transparent; color:#aaa; border:1px solid #3a3a3a; border-radius:7px; padding:7px 10px; cursor:pointer; font-weight:700; }
+.logout-button:hover { color:#e0c158; border-color:#6a571a; background:#181818; }

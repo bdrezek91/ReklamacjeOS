@@ -11,7 +11,10 @@
 <body>
   <header class="topbar">
     <a class="brand" href="{{ root_path }}/"><span class="brand-dampol">DAMPOL</span><span class="brand-divider">/</span>ReklamacjeOS</a>
-    <span class="environment">OBSŁUGA REKLAMACJI PRODUKCYJNYCH</span>
+    <div class="topbar-right">
+      <span class="environment">OBSŁUGA REKLAMACJI PRODUKCYJNYCH</span>
+      <form method="post" action="{{ root_path }}/logout"><button class="logout-button" type="submit">Wyloguj</button></form>
+    </div>
   </header>
   <div class="layout">
     <nav class="sidebar" aria-label="Główna nawigacja">

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Logowanie · ReklamacjeOS</title>
+  <style>
+    :root{color-scheme:dark;font-family:Inter,"Segoe UI",system-ui,Arial,sans-serif}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;background:
+      radial-gradient(circle at 20% 10%,rgba(201,162,39,.16),transparent 34%),
+      linear-gradient(145deg,#090909,#171717 55%,#0d0d0d);color:#f2f2f2;padding:24px}
+    .card{width:min(390px,100%);background:rgba(24,24,24,.96);border:1px solid #353535;border-radius:14px;
+      padding:34px;box-shadow:0 24px 70px rgba(0,0,0,.45)}
+    .logo{text-align:center;color:#c9a227;font-weight:800;letter-spacing:.14em;font-size:20px}
+    h1{text-align:center;margin:14px 0 5px;font-size:25px}.sub{text-align:center;color:#929292;font-size:14px;margin-bottom:26px}
+    label{display:block;font-size:13px;font-weight:700;margin:14px 0 7px}
+    input{width:100%;border:1px solid #404040;background:#101010;color:#fff;border-radius:9px;padding:12px 13px;font-size:15px}
+    input:focus{outline:2px solid rgba(201,162,39,.3);border-color:#c9a227}
+    button{width:100%;margin-top:22px;border:0;border-radius:9px;background:#c9a227;color:#111;padding:12px 14px;
+      font-weight:800;font-size:15px;cursor:pointer} button:hover{background:#e0c158}
+    .error{border:1px solid #663636;background:#2a1717;color:#f0b4b4;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px}
+    .foot{text-align:center;color:#666;font-size:11px;margin-top:22px}
+  </style>
+</head>
+<body>
+  <form class="card" method="post" action="{{ root_path }}/login">
+    <div class="logo">DAMPOL</div>
+    <h1>ReklamacjeOS</h1>
+    <div class="sub">Zaloguj się, aby kontynuować</div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <label for="username">Użytkownik</label>
+    <input id="username" name="username" autocomplete="username" required autofocus>
+    <label for="password">Hasło</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Zaloguj</button>
+    <div class="foot">Obsługa reklamacji produkcyjnych</div>
+  </form>
+</body>
+</html>

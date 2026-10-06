@@ -6,3 +6,5 @@ python-multipart==0.0.20
 sqlalchemy==2.0.38
 typesafe-sdk==0.7.2
 uvicorn[standard]==0.34.0
+
+bcrypt==4.2.1
