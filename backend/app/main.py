@@ -83,6 +83,7 @@ async def browser_auth(request: Request, call_next):
         or path == "/login"
         or path.startswith("/static/")
         or path.startswith("/api/internal/whatsapp/")
+        or path.startswith("/api/internal/email/")
     ):
         return await call_next(request)
     if valid_session(request.cookies.get(COOKIE_NAME)):

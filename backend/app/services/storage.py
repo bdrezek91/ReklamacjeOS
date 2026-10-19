@@ -14,6 +14,7 @@ ALLOWED_MIME_TYPES = {
     "image/webp": ".webp",
     "image/heic": ".heic",
     "image/heif": ".heif",
+    "application/pdf": ".pdf",
 }
 
 
@@ -35,6 +36,8 @@ async def store_original_media(
     upload: UploadFile,
     message_id: str,
     source_timestamp: datetime,
+    *,
+    source_kind: str = "whatsapp",
 ) -> StoredFile:
     mime_type = (upload.content_type or "").lower()
     if mime_type not in ALLOWED_MIME_TYPES:
@@ -55,7 +58,13 @@ async def store_original_media(
     if Path(filename).suffix.lower() not in {extension, ".jpeg" if extension == ".jpg" else extension}:
         filename = f"{filename}{extension}"
 
-    relative_dir = Path(str(source_timestamp.year)) / "INBOX" / "whatsapp" / safe_part(message_id) / "original"
+    relative_dir = (
+        Path(str(source_timestamp.year))
+        / "INBOX"
+        / safe_part(source_kind)
+        / safe_part(message_id)
+        / "original"
+    )
     relative_path = relative_dir / f"{digest[:12]}_{filename}"
     absolute_path = settings.data_root / relative_path
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
