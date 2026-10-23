@@ -212,6 +212,95 @@
       <section class="notice">Dostawca: <strong>{{ complaint.supplier.name }}</strong> · {{ complaint.supplier.email }}</section>
     {% endif %}
 
+    {% if email_thread %}
+      <section class="panel correspondence-panel supplier-thread-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Korespondencja z dostawcą</p>
+            <h2>Odpowiedzi e-mail</h2>
+          </div>
+          <span class="badge">{{ email_thread|length }} wiad.</span>
+        </div>
+
+        {% if latest_supplier_message %}
+          <div class="supplier-latest-message">
+            <div class="message-meta">
+              <strong>Ostatnia odpowiedź dostawcy</strong>
+              <time datetime="{{ latest_supplier_message.timestamp.isoformat() }}">{{ latest_supplier_message.timestamp.strftime('%d.%m.%Y %H:%M') }}</time>
+            </div>
+            {% if latest_supplier_message.subject %}<p class="supplier-subject">{{ latest_supplier_message.subject }}</p>{% endif %}
+            <div class="supplier-message-body">{{ latest_supplier_message.body }}</div>
+            {% if latest_supplier_message.attachments %}
+              <div class="supplier-attachments">
+                {% for attachment in latest_supplier_message.attachments %}
+                  <a href="{{ root_path }}/media/{{ attachment.id }}" target="_blank" rel="noopener">{{ attachment.original_filename }}</a>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="supplier-reply-box">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow">Na podstawie decyzji biznesowej</p>
+                <h3>Proponowana odpowiedź</h3>
+              </div>
+              {% if complaint.resolution_strategy %}
+                <span class="badge">{{ business_decisions.get(complaint.resolution_strategy, {}).get('label', complaint.resolution_strategy) }}</span>
+              {% endif %}
+            </div>
+
+            {% if not complaint.resolution_strategy %}
+              <p class="notice warning">Najpierw wybierz u góry decyzję biznesową. Wtedy system przygotuje odpowiedź zgodną z wybraną ścieżką.</p>
+            {% else %}
+              {% if supplier_reply_draft %}
+                <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/supplier-reply/save">
+                  <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+                  <textarea id="supplier-reply-body" name="body" rows="12">{{ supplier_reply_draft.body }}</textarea>
+                  <div class="correspondence-actions">
+                    <button class="button secondary" type="submit">Zapisz poprawioną treść</button>
+                    <button class="button secondary" id="copy-supplier-reply" type="button">Kopiuj odpowiedź</button>
+                  </div>
+                </form>
+                <p class="muted">
+                  Źródło szkicu:
+                  {% if supplier_reply_draft.provider == 'openai' %}AI · {{ supplier_reply_draft.model }}
+                  {% elif supplier_reply_draft.fallback %}bezpieczny szablon awaryjny
+                  {% else %}edycja ręczna{% endif %}.
+                  Nic nie jest wysyłane automatycznie.
+                </p>
+              {% else %}
+                <p class="muted">Odpowiedź dostawcy jest przypisana do tej reklamacji. Wygeneruj szkic zgodny z wybraną decyzją.</p>
+              {% endif %}
+
+              <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/supplier-reply/generate">
+                <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+                <button class="button" type="submit">{{ 'Regeneruj odpowiedź' if supplier_reply_draft else 'Wygeneruj odpowiedź' }}</button>
+              </form>
+            {% endif %}
+          </div>
+        {% else %}
+          <p class="muted">Mail inicjujący reklamację jest już w systemie. Czekamy na odpowiedź dostawcy.</p>
+        {% endif %}
+
+        <details class="supplier-thread-history">
+          <summary>Pokaż cały wątek e-mail ({{ email_thread|length }})</summary>
+          <div class="supplier-thread-list">
+            {% for item in email_thread %}
+              <article class="supplier-thread-item {{ 'incoming' if item.direction == 'incoming' else 'outgoing' }}">
+                <div class="message-meta">
+                  <strong>{{ 'Dostawca → DAMPOL' if item.direction == 'incoming' else 'DAMPOL → dostawca' }}</strong>
+                  <time datetime="{{ item.timestamp.isoformat() }}">{{ item.timestamp.strftime('%d.%m.%Y %H:%M') }}</time>
+                </div>
+                {% if item.subject %}<p class="supplier-subject">{{ item.subject }}</p>{% endif %}
+                <div class="supplier-message-body compact-body">{{ item.body }}</div>
+              </article>
+            {% endfor %}
+          </div>
+        </details>
+      </section>
+    {% endif %}
+
     {% if false and (complaint.whatsapp_resolution or complaint.status.value in ['accepted', 'ready_to_send', 'sent']) %}
       <section class="panel correspondence-panel">
         <div class="section-heading">
@@ -429,6 +518,14 @@
     <script>
       document.getElementById("copy-email-body")?.addEventListener("click", async (event) => {
         await navigator.clipboard.writeText(document.getElementById("email-body").value);
+        event.currentTarget.textContent = "Skopiowano";
+      });
+    </script>
+  {% endif %}
+  {% if supplier_reply_draft %}
+    <script>
+      document.getElementById("copy-supplier-reply")?.addEventListener("click", async (event) => {
+        await navigator.clipboard.writeText(document.getElementById("supplier-reply-body").value);
         event.currentTarget.textContent = "Skopiowano";
       });
     </script>

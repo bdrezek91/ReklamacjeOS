@@ -16,6 +16,7 @@ from .services.grouping import DraftOperationError, assign_message_to_draft, cre
 from .services.intake import extract_fields_from_text, merge_extracted_fields
 from .services.ocr import SUPPORTED_IMAGE_TYPES, queue_complaint_ocr
 from .services.storage import store_original_media
+from .services.supplier_thread import find_complaint_for_email, generate_supplier_reply
 
 router = APIRouter()
 
@@ -69,6 +70,7 @@ async def ingest_manual_email(
             "sender": sender,
             "recipients": recipients,
             "subject": subject,
+            "direction": "outgoing",
         },
     )
     db.add(message)
@@ -169,6 +171,200 @@ async def ingest_manual_email(
         "draft_number": complaint.draft_number,
         "source": "email",
         "attachments": len(seen_paths),
+    }
+
+
+@router.post("/api/internal/email/thread")
+async def ingest_email_thread_message(
+    source_id: str = Form(...),
+    direction: str = Form(...),
+    folder: str = Form(...),
+    uid: int = Form(...),
+    message_id: str = Form(default=""),
+    in_reply_to: str = Form(default=""),
+    references: str = Form(default=""),
+    sender: str = Form(default=""),
+    recipients: str = Form(default=""),
+    subject: str = Form(default=""),
+    source_timestamp: datetime = Form(...),
+    body: str = Form(default=""),
+    media: list[UploadFile] | None = File(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    if direction not in {"incoming", "outgoing"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid direction")
+
+    existing = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.wa_message_id == source_id))
+    if existing is not None:
+        complaint = db.get(Complaint, existing.complaint_id) if existing.complaint_id else None
+        return {
+            "id": existing.id,
+            "created": False,
+            "matched": bool(complaint),
+            "complaint_id": complaint.id if complaint else None,
+            "draft_number": complaint.draft_number if complaint else None,
+        }
+
+    complaint, match_rule = find_complaint_for_email(
+        db,
+        in_reply_to=in_reply_to,
+        references=references,
+        subject=subject,
+        body=body,
+        source_timestamp=source_timestamp,
+        sender=sender,
+    )
+    if complaint is None:
+        return {
+            "created": False,
+            "matched": False,
+            "match_rule": match_rule,
+            "source_id": source_id,
+        }
+
+    message = WhatsAppMessage(
+        wa_message_id=source_id,
+        complaint_id=complaint.id,
+        group_id="email-thread",
+        group_name="Korespondencja e-mail z dostawcą",
+        author_id=sender or None,
+        author_name=sender or "E-mail",
+        body=body,
+        message_type="email",
+        quoted_message_id=None,
+        source_timestamp=source_timestamp,
+        source_payload={
+            "source": "email",
+            "direction": direction,
+            "folder": folder,
+            "uid": uid,
+            "message_id": message_id,
+            "in_reply_to": in_reply_to,
+            "references": references,
+            "sender": sender,
+            "recipients": recipients,
+            "subject": subject,
+            "match_rule": match_rule,
+        },
+    )
+    db.add(message)
+
+    try:
+        db.flush()
+        seen_paths: set[str] = set()
+        for upload in media or []:
+            stored = await store_original_media(
+                upload,
+                source_id,
+                source_timestamp,
+                source_kind="email",
+            )
+            if stored.relative_path in seen_paths:
+                continue
+            seen_paths.add(stored.relative_path)
+            db.add(
+                Attachment(
+                    whatsapp_message_id=message.id,
+                    original_filename=stored.original_filename,
+                    storage_path=stored.relative_path,
+                    mime_type=stored.mime_type,
+                    size_bytes=stored.size_bytes,
+                    sha256=stored.sha256,
+                    include_in_email=False,
+                )
+            )
+
+        if complaint.supplier_id is None:
+            address = sender if direction == "incoming" else recipients
+            address_lower = address.lower()
+            for supplier in db.scalars(select(Supplier).where(Supplier.active.is_(True))).all():
+                supplier_domain = (supplier.email or "").rsplit("@", 1)[-1].lower()
+                if supplier_domain and f"@{supplier_domain}" in address_lower:
+                    complaint.supplier_id = supplier.id
+                    break
+
+        db.add(
+            ComplaintEvent(
+                complaint_id=complaint.id,
+                event_type="supplier_email_received" if direction == "incoming" else "manual_reply_email_imported",
+                actor="system:email-thread",
+                details={
+                    "source_id": source_id,
+                    "direction": direction,
+                    "folder": folder,
+                    "uid": uid,
+                    "subject": subject,
+                    "sender": sender,
+                    "recipients": recipients,
+                    "message_id": message_id,
+                    "in_reply_to": in_reply_to,
+                    "references": references,
+                    "match_rule": match_rule,
+                    "attachments": len(seen_paths),
+                },
+            )
+        )
+        db.flush()
+
+        reply_draft = None
+        if direction == "incoming" and complaint.resolution_strategy:
+            incoming_view = {
+                "id": message.id,
+                "source_id": source_id,
+                "direction": "incoming",
+                "sender": sender,
+                "recipients": recipients,
+                "subject": subject,
+                "body": body,
+                "message_id": message_id,
+                "in_reply_to": in_reply_to,
+                "references": references,
+                "timestamp": source_timestamp,
+                "attachments": [],
+            }
+            try:
+                reply_draft = generate_supplier_reply(
+                    db,
+                    complaint,
+                    actor="system:email-thread",
+                    incoming=incoming_view,
+                )
+            except Exception as error:
+                db.add(
+                    ComplaintEvent(
+                        complaint_id=complaint.id,
+                        event_type="supplier_reply_draft_failed",
+                        actor="system:email-thread",
+                        details={
+                            "reply_to_source_id": source_id,
+                            "error_type": type(error).__name__,
+                        },
+                    )
+                )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.scalar(select(WhatsAppMessage).where(WhatsAppMessage.wa_message_id == source_id))
+        if existing is not None:
+            complaint = db.get(Complaint, existing.complaint_id) if existing.complaint_id else None
+            return {
+                "id": existing.id,
+                "created": False,
+                "matched": bool(complaint),
+                "complaint_id": complaint.id if complaint else None,
+                "draft_number": complaint.draft_number if complaint else None,
+            }
+        raise
+
+    return {
+        "id": message.id,
+        "created": True,
+        "matched": True,
+        "match_rule": match_rule,
+        "complaint_id": complaint.id,
+        "draft_number": complaint.draft_number,
+        "attachments": len(seen_paths),
+        "reply_draft_generated": bool(reply_draft),
     }
 
 

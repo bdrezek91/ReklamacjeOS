@@ -113,3 +113,43 @@ th { color:#c9a227; font-size:12px; text-transform:uppercase; letter-spacing:.05
 .topbar-right form { margin:0; }
 .logout-button { background:transparent; color:#aaa; border:1px solid #3a3a3a; border-radius:7px; padding:7px 10px; cursor:pointer; font-weight:700; }
 .logout-button:hover { color:#e0c158; border-color:#6a571a; background:#181818; }
+
+.supplier-thread-panel { display:grid; gap:18px; }
+.supplier-latest-message,
+.supplier-reply-box,
+.supplier-thread-item {
+  border:1px solid #343434;
+  border-radius:10px;
+  background:#121212;
+  padding:16px;
+}
+.supplier-latest-message { border-left:3px solid #c9a227; }
+.supplier-subject { font-weight:800; margin:8px 0 12px; }
+.supplier-message-body { white-space:pre-wrap; line-height:1.55; color:#e7e7e7; }
+.compact-body { max-height:260px; overflow:auto; font-size:13px; color:#cfcfcf; }
+.supplier-reply-box textarea {
+  width:100%;
+  min-height:210px;
+  resize:vertical;
+  margin:8px 0 12px;
+  background:#0d0d0d;
+  color:#f3f3f3;
+  border:1px solid #3a3a3a;
+  border-radius:8px;
+  padding:12px;
+  line-height:1.5;
+}
+.supplier-attachments { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.supplier-attachments a {
+  border:1px solid #4a4a4a;
+  border-radius:999px;
+  padding:6px 10px;
+  color:#d8bd63;
+  text-decoration:none;
+  font-size:12px;
+}
+.supplier-thread-history summary { cursor:pointer; font-weight:800; color:#d8bd63; }
+.supplier-thread-list { display:grid; gap:10px; margin-top:12px; }
+.supplier-thread-item.incoming { border-left:3px solid #c9a227; }
+.supplier-thread-item.outgoing { border-left:3px solid #666; }
+.section-heading.compact { margin-bottom:8px; }

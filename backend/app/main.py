@@ -55,6 +55,13 @@ from .services.intake import (
 )
 from .services.jev import analyze_complaint_with_jev, answer_rows
 from .services.ocr import SUPPORTED_IMAGE_TYPES, queue_complaint_ocr, save_corrected_ocr_text
+from .services.supplier_thread import (
+    complaint_email_thread,
+    generate_supplier_reply,
+    latest_reply_draft,
+    latest_supplier_email,
+    save_supplier_reply_draft,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -299,6 +306,12 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     email_outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id))
     suppliers = db.scalars(select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)).all()
     latest_jev_assessment = max(complaint.jev_assessments, key=lambda item: item.id, default=None)
+    email_thread = complaint_email_thread(complaint)
+    latest_supplier_message = latest_supplier_email(complaint)
+    supplier_reply_draft = latest_reply_draft(
+        complaint,
+        latest_supplier_message["source_id"] if latest_supplier_message else None,
+    )
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
@@ -355,8 +368,53 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "jev_assessment": latest_jev_assessment,
             "jev_answer_rows": answer_rows(latest_jev_assessment),
             "suppliers": suppliers,
+            "email_thread": email_thread,
+            "latest_supplier_message": latest_supplier_message,
+            "supplier_reply_draft": supplier_reply_draft,
         },
     )
+
+
+@app.post("/drafts/{complaint_id}/supplier-reply/generate")
+def generate_supplier_reply_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None or complaint.merged_into_id is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reklamacja nie istnieje")
+    try:
+        generate_supplier_reply(db, complaint, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    except RuntimeError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/supplier-reply/save")
+def save_supplier_reply_action(
+    complaint_id: int,
+    body: str = Form(...),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None or complaint.merged_into_id is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reklamacja nie istnieje")
+    try:
+        save_supplier_reply_draft(db, complaint, body=body, actor="panel")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/drafts/{complaint_id}/analyze-jev")
