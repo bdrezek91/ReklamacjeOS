@@ -570,6 +570,11 @@ def set_resolution_strategy_action(
         db.flush()
         ensure_missing_data_question(db, complaint, group_id=settings.whatsapp_group_id)
         auto_prepare_supplier_workflow(db, complaint, actor="system")
+        if latest_supplier_email(complaint) is not None:
+            try:
+                generate_supplier_reply(db, complaint, actor="system:decision")
+            except RuntimeError:
+                pass
         db.commit()
     except DraftOperationError as error:
         db.rollback()
