@@ -19,6 +19,105 @@
     </div>
   </section>
 
+  <section class="autopilot-case {{ autopilot.tone }}">
+    <div class="autopilot-case-main">
+      <span class="work-state {{ autopilot.tone }}">{{ autopilot.label }}</span>
+      <h2>{{ autopilot.headline }}</h2>
+      <p>{{ autopilot.next_action }}</p>
+    </div>
+    {% if autopilot.last_move %}
+      <div class="autopilot-last">
+        <span>Ostatni ruch</span>
+        <strong>{{ autopilot.last_move.who }}</strong>
+        <time datetime="{{ autopilot.last_move.timestamp.isoformat() }}">{{ autopilot.last_move.timestamp.strftime('%d.%m.%Y %H:%M') }}</time>
+      </div>
+    {% endif %}
+  </section>
+
+  <div class="simple-case-grid">
+    <section class="panel simple-summary">
+      <div class="section-heading compact">
+        <div><p class="eyebrow">Sprawa</p><h2>Najważniejsze dane</h2></div>
+        {% if complaint.supplier %}<span class="badge">{{ complaint.supplier.name }}</span>{% endif %}
+      </div>
+      {% if autopilot.case_line %}<p class="case-line-big">{{ autopilot.case_line }}</p>{% endif %}
+      {% if autopilot.defect %}
+        <div class="simple-data-row"><span>Problem</span><p>{{ autopilot.defect }}</p></div>
+      {% endif %}
+      {% if card_data.get('customer_project') %}
+        <div class="simple-data-row"><span>Projekt</span><p>{{ card_data.get('customer_project') }}</p></div>
+      {% endif %}
+      {% if complaint.official_number %}
+        <div class="simple-data-row"><span>Numer</span><p>{{ complaint.official_number }}</p></div>
+      {% endif %}
+      {% if autopilot.missing_fields %}
+        <div class="simple-warning">Brakuje: {% for field in autopilot.missing_fields %}{{ missing_field_labels.get(field, field) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+      {% endif %}
+    </section>
+
+    <section class="panel simple-position">
+      <div class="section-heading compact">
+        <div><p class="eyebrow">Aktualne stanowisko</p><h2>{{ 'Twoja ostatnia odpowiedź' if autopilot.current_position else 'Ostatnia aktywność' }}</h2></div>
+      </div>
+      {% if autopilot.current_position %}
+        <div class="mail-excerpt">{{ autopilot.current_position }}</div>
+      {% elif autopilot.last_move %}
+        <div class="mail-excerpt">{{ autopilot.last_move.excerpt }}</div>
+      {% else %}
+        <p class="muted">Brak korespondencji e-mail w tej sprawie.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  {% if autopilot.needs_reply and autopilot.latest_supplier %}
+    <section class="panel simple-reply-panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Nowa odpowiedź dostawcy</p>
+          <h2>{{ complaint.supplier.name if complaint.supplier else 'Dostawca' }} odpisał</h2>
+        </div>
+        <time datetime="{{ autopilot.latest_supplier.timestamp.isoformat() }}">{{ autopilot.latest_supplier.timestamp.strftime('%d.%m.%Y %H:%M') }}</time>
+      </div>
+      <div class="mail-excerpt supplier-excerpt">{{ autopilot.supplier_position }}</div>
+
+      <div class="simple-ai-reply">
+        <h3>Proponowana odpowiedź</h3>
+        {% if supplier_reply_draft %}
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/supplier-reply/save">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <textarea id="simple-supplier-reply" name="body" rows="10">{{ supplier_reply_draft.body }}</textarea>
+            <div class="correspondence-actions">
+              <button class="button secondary" type="submit">Zapisz zmiany</button>
+              <button class="button" id="simple-copy-reply" type="button">Kopiuj odpowiedź</button>
+            </div>
+          </form>
+          <form class="inline-regenerate" method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/supplier-reply/generate">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="text-button" type="submit">Regeneruj propozycję</button>
+          </form>
+        {% else %}
+          <p class="muted">System zna cały wątek i Twoje ostatnie stanowisko.</p>
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/supplier-reply/generate">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="button" type="submit">Przygotuj odpowiedź</button>
+          </form>
+        {% endif %}
+      </div>
+    </section>
+  {% elif autopilot.bucket == 'waiting' and autopilot.latest_supplier %}
+    <details class="simple-thread-preview">
+      <summary>Poprzednia odpowiedź dostawcy</summary>
+      <div class="mail-excerpt">{{ autopilot.supplier_position }}</div>
+    </details>
+  {% endif %}
+
+  <details class="advanced-tools">
+    <summary>
+      <span>Narzędzia zaawansowane</span>
+      <small>OCR, JEV, dane techniczne, statusy, pełny wątek i historia</small>
+    </summary>
+    <div class="advanced-tools-body">
+
   {% if complaint.merged_into %}
     <section class="notice warning">
       Ta reklamacja została scalona do
@@ -514,6 +613,9 @@
       </div>
     {% else %}<p class="muted">Brak zdarzeń.</p>{% endif %}
   </section>
+    </div>
+  </details>
+
   {% if email_draft %}
     <script>
       document.getElementById("copy-email-body")?.addEventListener("click", async (event) => {
@@ -526,6 +628,14 @@
     <script>
       document.getElementById("copy-supplier-reply")?.addEventListener("click", async (event) => {
         await navigator.clipboard.writeText(document.getElementById("supplier-reply-body").value);
+        event.currentTarget.textContent = "Skopiowano";
+      });
+    </script>
+  {% endif %}
+  {% if supplier_reply_draft %}
+    <script>
+      document.getElementById("simple-copy-reply")?.addEventListener("click", async (event) => {
+        await navigator.clipboard.writeText(document.getElementById("simple-supplier-reply").value);
         event.currentTarget.textContent = "Skopiowano";
       });
     </script>

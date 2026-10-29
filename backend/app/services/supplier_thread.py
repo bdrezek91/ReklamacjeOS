@@ -89,6 +89,11 @@ def latest_supplier_email(complaint: Complaint) -> dict[str, Any] | None:
     return incoming[-1] if incoming else None
 
 
+def latest_outgoing_email(complaint: Complaint) -> dict[str, Any] | None:
+    outgoing = [row for row in complaint_email_thread(complaint) if row["direction"] == "outgoing"]
+    return outgoing[-1] if outgoing else None
+
+
 def _active_complaints(db: Session) -> list[Complaint]:
     return db.scalars(
         select(Complaint)
@@ -222,22 +227,24 @@ def generate_supplier_reply(
     actor: str,
     incoming: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if not complaint.resolution_strategy:
-        raise DraftOperationError("Najpierw wybierz decyzję biznesową dla reklamacji")
-
     latest = incoming or latest_supplier_email(complaint)
     if latest is None:
         raise DraftOperationError("Brak odpowiedzi dostawcy, do której można przygotować szkic")
 
-    decision = BUSINESS_DECISIONS.get(complaint.resolution_strategy)
-    if decision is None:
+    decision = BUSINESS_DECISIONS.get(complaint.resolution_strategy) if complaint.resolution_strategy else None
+    if complaint.resolution_strategy and decision is None:
         raise DraftOperationError("Nieznana decyzja biznesowa")
 
     thread = complaint_email_thread(complaint)
+    last_outgoing = latest_outgoing_email(complaint)
+    business_position = ""
+    if last_outgoing is not None and last_outgoing["timestamp"] <= latest["timestamp"]:
+        business_position = last_outgoing["body"]
     payload = {
         "complaint_label": complaint.official_number or complaint.draft_number,
         "supplier_name": complaint.supplier.name if complaint.supplier else "Paneltech",
-        "resolution_strategy": complaint.resolution_strategy,
+        "resolution_strategy": complaint.resolution_strategy or "",
+        "business_position": business_position,
         "discount_percent": complaint.resolution_discount_percent,
         "approved_card": complaint.approved_data or {},
         "latest_supplier_message": latest["body"],
@@ -264,7 +271,7 @@ def generate_supplier_reply(
         "fallback": bool(result.get("fallback", False)),
         "reply_to_source_id": latest["source_id"],
         "decision": complaint.resolution_strategy,
-        "decision_label": decision["label"],
+        "decision_label": decision["label"] if decision else "Stanowisko z ostatniej wiadomości użytkownika",
     }
     db.add(
         ComplaintEvent(

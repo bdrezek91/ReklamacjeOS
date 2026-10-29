@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · ReklamacjeOS{% endblock %}
+{% block content %}
+  <div class="page-heading simple-heading">
+    <div>
+      <p class="eyebrow">Autopilot</p>
+      <h1>{{ title }}</h1>
+      <p class="muted">{{ subtitle }}</p>
+    </div>
+    <span class="badge">{{ views|length }}</span>
+  </div>
+
+  <form class="filter-bar compact-filter" method="get">
+    <input name="q" value="{{ query }}" placeholder="Szukaj: numer, ZS, projekt, dostawca">
+    <button class="button secondary" type="submit">Szukaj</button>
+  </form>
+
+  {% if views %}
+    <div class="work-cards">
+      {% for item in views %}
+        {% set complaint = item.complaint %}
+        {% set auto = item.autopilot %}
+        <a class="work-card {{ auto.tone }}" href="{{ root_path }}/drafts/{{ complaint.id }}">
+          <div class="work-card-top">
+            <div>
+              <span class="work-state {{ auto.tone }}">{{ auto.label }}</span>
+              <h3>{{ complaint_display_name(complaint) }}</h3>
+            </div>
+            {% if complaint.official_number %}<span class="badge">{{ complaint.official_number }}</span>{% endif %}
+          </div>
+          {% if auto.case_line %}<p class="work-case-line">{{ auto.case_line }}</p>{% endif %}
+          <p class="work-headline">{{ auto.headline }}</p>
+          <p class="work-next">{{ auto.next_action }}</p>
+          {% if auto.last_move %}
+            <div class="work-last-move">
+              <strong>{{ auto.last_move.who }}</strong>
+              <span>{{ auto.last_move.timestamp.strftime('%d.%m.%Y %H:%M') }}</span>
+            </div>
+          {% endif %}
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <section class="empty-state"><h2>Tu jest czysto</h2><p>Brak reklamacji w tej kolejce.</p></section>
+  {% endif %}
+{% endblock %}

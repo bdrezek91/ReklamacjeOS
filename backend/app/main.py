@@ -24,6 +24,7 @@ from .models import (
     WhatsAppMessage,
     WhatsAppOutbox,
 )
+from .services.autopilot import derive_autopilot, sort_key
 from .services.complaints import (
     BUSINESS_DECISIONS,
     WHATSAPP_RESOLUTIONS,
@@ -152,38 +153,104 @@ def health() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    message_count = db.scalar(select(func.count()).select_from(WhatsAppMessage)) or 0
-    attachment_count = db.scalar(select(func.count()).select_from(Attachment)) or 0
-    status_counts = dict(db.execute(select(Complaint.status, func.count()).group_by(Complaint.status)).all())
-    recent_complaints = db.scalars(
+    complaints = db.scalars(
         select(Complaint)
-        .options(selectinload(Complaint.supplier))
+        .options(
+            selectinload(Complaint.supplier),
+            selectinload(Complaint.events),
+            selectinload(Complaint.messages).selectinload(WhatsAppMessage.attachments),
+        )
         .where(Complaint.merged_into_id.is_(None))
         .order_by(Complaint.updated_at.desc(), Complaint.id.desc())
-        .limit(8)
-    ).all()
+    ).unique().all()
+    views = [{"complaint": complaint, "autopilot": derive_autopilot(complaint)} for complaint in complaints]
+    views.sort(key=sort_key)
+    action_views = [item for item in views if item["autopilot"]["bucket"] == "action"]
+    waiting_views = [item for item in views if item["autopilot"]["bucket"] == "waiting"]
+    closed_views = [item for item in views if item["autopilot"]["bucket"] == "closed"]
+
     whatsapp_failed = db.scalar(
         select(func.count()).select_from(WhatsAppOutbox).where(WhatsAppOutbox.status == "failed")
     ) or 0
     email_failed = db.scalar(
         select(func.count()).select_from(EmailOutbox).where(EmailOutbox.status.in_({"failed", "unknown"}))
     ) or 0
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
         context={
             "active": "dashboard",
-            "message_count": message_count,
-            "attachment_count": attachment_count,
-            "draft_count": status_counts.get(ComplaintStatus.DRAFT, 0),
-            "pending_count": status_counts.get(ComplaintStatus.PENDING_APPROVAL, 0),
-            "accepted_count": status_counts.get(ComplaintStatus.ACCEPTED, 0),
-            "ready_count": status_counts.get(ComplaintStatus.READY_TO_SEND, 0),
-            "sent_count": status_counts.get(ComplaintStatus.SENT, 0),
-            "closed_count": status_counts.get(ComplaintStatus.CLOSED, 0),
-            "recent_complaints": recent_complaints,
+            "action_count": len(action_views),
+            "waiting_count": len(waiting_views),
+            "closed_count": len(closed_views),
+            "priority_views": (action_views + waiting_views)[:10],
             "whatsapp_failed": whatsapp_failed,
             "email_failed": email_failed,
+        },
+    )
+
+
+@app.get("/work/{bucket}", response_class=HTMLResponse)
+def work_queue(
+    bucket: str,
+    request: Request,
+    q: str = "",
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    allowed = {
+        "action": ("Do zrobienia", "Sprawy, które wymagają Twojej reakcji."),
+        "waiting": ("Czekamy", "Sprawy, w których kolejny ruch jest po stronie dostawcy."),
+        "closed": ("Zamknięte", "Zakończone reklamacje."),
+        "all": ("Wszystkie", "Pełna lista reklamacji."),
+    }
+    if bucket not in allowed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nieznana kolejka")
+
+    complaints = db.scalars(
+        select(Complaint)
+        .options(
+            selectinload(Complaint.supplier),
+            selectinload(Complaint.events),
+            selectinload(Complaint.messages).selectinload(WhatsAppMessage.attachments),
+        )
+        .where(Complaint.merged_into_id.is_(None))
+        .order_by(Complaint.updated_at.desc(), Complaint.id.desc())
+    ).unique().all()
+
+    clean_query = q.strip().lower()
+    views = []
+    for complaint in complaints:
+        autopilot = derive_autopilot(complaint)
+        if bucket != "all" and autopilot["bucket"] != bucket:
+            continue
+        if clean_query:
+            card = complaint.approved_data or {}
+            haystack = " ".join(
+                [
+                    complaint.draft_number or "",
+                    complaint.official_number or "",
+                    complaint.supplier.name if complaint.supplier else "",
+                    str(card.get("paneltech_order_number") or ""),
+                    str(card.get("customer_project") or ""),
+                    str(card.get("material_product") or ""),
+                ]
+            ).lower()
+            if clean_query not in haystack:
+                continue
+        views.append({"complaint": complaint, "autopilot": autopilot})
+    views.sort(key=sort_key)
+    title, subtitle = allowed[bucket]
+    return templates.TemplateResponse(
+        request=request,
+        name="worklist.html",
+        context={
+            "active": f"work-{bucket}",
+            "bucket": bucket,
+            "title": title,
+            "subtitle": subtitle,
+            "views": views,
+            "query": q.strip(),
         },
     )
 
@@ -312,18 +379,13 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
         complaint,
         latest_supplier_message["source_id"] if latest_supplier_message else None,
     )
+    autopilot = derive_autopilot(complaint)
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
         context={
-            "active": {
-                ComplaintStatus.DRAFT: "drafts",
-                ComplaintStatus.PENDING_APPROVAL: "pending",
-                ComplaintStatus.ACCEPTED: "accepted",
-                ComplaintStatus.READY_TO_SEND: "ready",
-                ComplaintStatus.SENT: "sent",
-                ComplaintStatus.CLOSED: "closed",
-            }[complaint.status],
+            "active": f"work-{autopilot['bucket']}",
+            "autopilot": autopilot,
             "complaint": complaint,
             "messages": messages,
             "events": events,

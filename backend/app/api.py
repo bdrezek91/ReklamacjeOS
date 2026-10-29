@@ -4,7 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -274,6 +274,8 @@ async def ingest_email_thread_message(
                 )
             )
 
+        complaint.updated_at = func.now()
+
         if complaint.supplier_id is None:
             address = sender if direction == "incoming" else recipients
             address_lower = address.lower()
@@ -307,7 +309,7 @@ async def ingest_email_thread_message(
         db.flush()
 
         reply_draft = None
-        if direction == "incoming" and complaint.resolution_strategy:
+        if direction == "incoming":
             incoming_view = {
                 "id": message.id,
                 "source_id": source_id,

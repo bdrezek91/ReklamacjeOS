@@ -19,14 +19,16 @@
   <div class="layout">
     <nav class="sidebar" aria-label="Główna nawigacja">
       <a class="{{ 'active' if active == 'dashboard' else '' }}" href="{{ root_path }}/">Pulpit</a>
-      <a class="{{ 'active' if active == 'inbox' else '' }}" href="{{ root_path }}/inbox">WhatsApp</a>
-      <a class="{{ 'active' if active == 'drafts' else '' }}" href="{{ root_path }}/complaints/drafts">Nowe reklamacje</a>
-      <a class="{{ 'active' if active == 'pending' else '' }}" href="{{ root_path }}/complaints/pending">Do akceptacji</a>
-      <a class="{{ 'active' if active == 'accepted' else '' }}" href="{{ root_path }}/complaints/accepted">W toku</a>
-      <a class="{{ 'active' if active == 'ready' else '' }}" href="{{ root_path }}/complaints/ready">Do wysłania</a>
-      <a class="{{ 'active' if active == 'sent' else '' }}" href="{{ root_path }}/complaints/sent">Wysłane</a>
-      <a class="{{ 'active' if active == 'closed' else '' }}" href="{{ root_path }}/complaints/closed">Zamknięte</a>
-      <a class="{{ 'active' if active == 'suppliers' else '' }}" href="{{ root_path }}/suppliers">Dostawcy</a>
+      <a class="{{ 'active' if active == 'work-action' else '' }}" href="{{ root_path }}/work/action"><span>Do zrobienia</span></a>
+      <a class="{{ 'active' if active == 'work-waiting' else '' }}" href="{{ root_path }}/work/waiting"><span>Czekamy</span></a>
+      <a class="{{ 'active' if active == 'work-closed' else '' }}" href="{{ root_path }}/work/closed"><span>Zamknięte</span></a>
+      <details class="sidebar-more" {% if active in ['inbox','suppliers','drafts','pending','accepted','ready','sent','work-all'] %}open{% endif %}>
+        <summary>Więcej</summary>
+        <a class="{{ 'active' if active == 'work-all' else '' }}" href="{{ root_path }}/work/all">Wszystkie reklamacje</a>
+        <a class="{{ 'active' if active == 'inbox' else '' }}" href="{{ root_path }}/inbox">Surowe wiadomości</a>
+        <a class="{{ 'active' if active == 'suppliers' else '' }}" href="{{ root_path }}/suppliers">Dostawcy</a>
+        <a href="{{ root_path }}/complaints/drafts">Statusy techniczne</a>
+      </details>
     </nav>
     <main class="content">{% block content %}{% endblock %}</main>
   </div>
