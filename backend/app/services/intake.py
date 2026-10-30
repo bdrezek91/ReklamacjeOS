@@ -106,6 +106,9 @@ def merge_extracted_fields(
 
 
 def missing_required_fields(complaint: Complaint) -> list[str]:
+    if complaint.resolution_strategy == "second_grade_no_claim":
+        return []
+
     data = complaint.approved_data or {}
     missing: list[str] = []
     for field_name in ("quantity", "dimensions", "defect_description"):
