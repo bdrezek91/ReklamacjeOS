@@ -414,6 +414,7 @@ def mark_whatsapp_outbox_sent(
             event_type={
                 "resolution": "whatsapp_resolution_sent",
                 "missing_data": "whatsapp_missing_data_sent",
+                "decision_notice": "whatsapp_decision_notice_sent",
             }.get(item.message_kind, "whatsapp_number_sent"),
             actor="whatsapp-bridge",
             details={"outbox_id": item.id, "wa_message_id": wa_message_id},
@@ -443,6 +444,7 @@ def mark_whatsapp_outbox_failed(
             event_type={
                 "resolution": "whatsapp_resolution_failed",
                 "missing_data": "whatsapp_missing_data_failed",
+                "decision_notice": "whatsapp_decision_notice_failed",
             }.get(item.message_kind, "whatsapp_number_failed"),
             actor="whatsapp-bridge",
             details={"outbox_id": item.id, "error": item.last_error},

@@ -69,6 +69,44 @@
     </section>
   </div>
 
+  {% if complaint.resolution_strategy %}
+    <section class="panel whatsapp-decision-panel">
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">Decyzja dla produkcji / magazynu</p>
+          <h2>Wyślij na WhatsApp</h2>
+        </div>
+        <span class="badge">{{ business_decisions.get(complaint.resolution_strategy, {}).get('label', complaint.resolution_strategy) }}</span>
+      </div>
+
+      {% if not decision_notice_outbox %}
+        <p class="muted">Treść możesz poprawić przed wysłaniem. Wiadomość trafi na skonfigurowaną grupę reklamacyjną.</p>
+        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/whatsapp-decision-message" onsubmit="return confirm('Wysłać tę decyzję na grupę WhatsApp?')">
+          <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+          <textarea name="body" rows="4" required>{{ whatsapp_decision_message }}</textarea>
+          <button class="button" type="submit">Wyślij na WhatsApp</button>
+        </form>
+      {% elif decision_notice_outbox.status == 'sent' %}
+        <div class="notice success">
+          <strong>Wysłano na WhatsApp.</strong>
+          <div class="whatsapp-sent-body">{{ decision_notice_outbox.body }}</div>
+        </div>
+      {% elif decision_notice_outbox.status in ['pending', 'processing'] %}
+        <div class="notice warning">
+          <strong>{{ 'Wysyłanie…' if decision_notice_outbox.status == 'processing' else 'Oczekuje na wysłanie…' }}</strong>
+          <div class="whatsapp-sent-body">{{ decision_notice_outbox.body }}</div>
+        </div>
+      {% elif decision_notice_outbox.status == 'failed' %}
+        <div class="notice warning"><strong>Wysyłka nie powiodła się.</strong> Możesz poprawić treść i spróbować ponownie.</div>
+        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/whatsapp-decision-message">
+          <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+          <textarea name="body" rows="4" required>{{ decision_notice_outbox.body }}</textarea>
+          <button class="button" type="submit">Ponów wysyłkę</button>
+        </form>
+      {% endif %}
+    </section>
+  {% endif %}
+
   {% if autopilot.needs_reply and autopilot.latest_supplier %}
     <section class="panel simple-reply-panel">
       <div class="section-heading">

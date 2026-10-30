@@ -30,6 +30,8 @@ from .services.complaints import (
     WHATSAPP_RESOLUTIONS,
     accept_complaint,
     change_complaint_status,
+    default_whatsapp_decision_message,
+    enqueue_whatsapp_decision_notice,
     enqueue_whatsapp_resolution,
     retry_whatsapp_notification,
     set_resolution_strategy,
@@ -369,6 +371,7 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     acceptance_outbox = next((item for item in outboxes if item.message_kind == "acceptance"), None)
     resolution_outbox = next((item for item in outboxes if item.message_kind == "resolution"), None)
     missing_data_outbox = next((item for item in outboxes if item.message_kind == "missing_data"), None)
+    decision_notice_outbox = next((item for item in outboxes if item.message_kind == "decision_notice"), None)
     email_draft = db.scalar(select(EmailDraft).where(EmailDraft.complaint_id == complaint.id))
     email_outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint.id))
     suppliers = db.scalars(select(Supplier).where(Supplier.active.is_(True)).order_by(Supplier.name)).all()
@@ -419,6 +422,8 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "acceptance_outbox": acceptance_outbox,
             "resolution_outbox": resolution_outbox,
             "missing_data_outbox": missing_data_outbox,
+            "decision_notice_outbox": decision_notice_outbox,
+            "whatsapp_decision_message": default_whatsapp_decision_message(complaint),
             "whatsapp_resolutions": WHATSAPP_RESOLUTIONS,
             "business_decisions": BUSINESS_DECISIONS,
             "missing_fields": missing_required_fields(complaint),
@@ -679,6 +684,45 @@ def accept_complaint_action(
         )
         db.flush()
         auto_prepare_supplier_workflow(db, complaint, actor="system")
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/whatsapp-decision-message")
+def whatsapp_decision_message_action(
+    complaint_id: int,
+    body: str = Form(...),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        enqueue_whatsapp_decision_notice(
+            db,
+            complaint_id,
+            body=body,
+            actor="panel",
+            group_id=settings.whatsapp_group_id,
+        )
+        db.commit()
+    except DraftOperationError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/retry-whatsapp-decision")
+def retry_whatsapp_decision_message_action(
+    complaint_id: int,
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        retry_whatsapp_notification(db, complaint_id, actor="panel", message_kind="decision_notice")
         db.commit()
     except DraftOperationError as error:
         db.rollback()

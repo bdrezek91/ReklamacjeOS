@@ -352,6 +352,98 @@ def enqueue_whatsapp_resolution(
     return item
 
 
+
+
+def default_whatsapp_decision_message(complaint: Complaint) -> str:
+    card = complaint.approved_data or {}
+    label = complaint.official_number or f"{complaint.id:04d}"
+    material = str(card.get("material_product") or "płyta / płyty").strip().rstrip(" .")
+    quantity = str(card.get("quantity") or "").strip().rstrip(" .")
+    item = f"{material} – {quantity}" if quantity else material
+
+    strategy = complaint.resolution_strategy or ""
+    if strategy == "second_grade_no_claim":
+        decision = (
+            "II gatunek. Brak możliwości reklamacji u dostawcy, ponieważ nie można wskazać "
+            "miejsca powstania wady / uszkodzenia."
+        )
+    elif strategy == "second_grade_50":
+        decision = "II gatunek; oczekujemy rozliczenia z rabatem 50%."
+    elif strategy == "reuse_first_grade":
+        decision = "wykorzystać jako I gatunek w innym pawilonie."
+    elif strategy == "return_to_supplier":
+        decision = "przygotować do zwrotu do Paneltech."
+    elif strategy == "keep_request_discount":
+        decision = "płyty zostają; negocjujemy rabat / korektę ceny z dostawcą."
+    else:
+        config = BUSINESS_DECISIONS.get(strategy)
+        decision = config["label"] if config else "decyzja do dalszej obsługi zgodnie z ustaleniami."
+
+    return f"Reklamacja {label}: {item}. Decyzja: {decision}"
+
+
+def enqueue_whatsapp_decision_notice(
+    db: Session,
+    complaint_id: int,
+    *,
+    body: str,
+    actor: str,
+    group_id: str,
+) -> WhatsAppOutbox:
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None or complaint.merged_into_id is not None:
+        raise DraftOperationError("Reklamacja nie istnieje")
+    if not group_id:
+        raise DraftOperationError("Grupa WhatsApp nie jest skonfigurowana")
+
+    clean_body = body.strip()
+    if not clean_body:
+        raise DraftOperationError("Treść wiadomości WhatsApp nie może być pusta")
+
+    existing = db.scalar(
+        select(WhatsAppOutbox).where(
+            WhatsAppOutbox.complaint_id == complaint.id,
+            WhatsAppOutbox.message_kind == "decision_notice",
+        )
+    )
+    if existing is not None:
+        if existing.status == "failed":
+            existing.body = clean_body
+            existing.status = "pending"
+            existing.last_error = None
+            existing.claimed_at = None
+            db.add(
+                ComplaintEvent(
+                    complaint_id=complaint.id,
+                    event_type="whatsapp_decision_notice_retry_requested",
+                    actor=actor,
+                    details={"outbox_id": existing.id},
+                )
+            )
+            return existing
+        raise DraftOperationError("Decyzja dla tej reklamacji została już zlecona na WhatsApp")
+
+    complaint.updated_at = func.now()
+    item = WhatsAppOutbox(
+        complaint_id=complaint.id,
+        group_id=group_id,
+        body=clean_body,
+        message_kind="decision_notice",
+        status="pending",
+    )
+    db.add(item)
+    db.add(
+        ComplaintEvent(
+            complaint_id=complaint.id,
+            event_type="whatsapp_decision_notice_queued",
+            actor=actor,
+            details={"body": clean_body},
+        )
+    )
+    db.flush()
+    return item
+
+
 def retry_whatsapp_notification(
     db: Session,
     complaint_id: int,
@@ -379,6 +471,8 @@ def retry_whatsapp_notification(
             event_type=(
                 "whatsapp_resolution_retry_requested"
                 if message_kind == "resolution"
+                else "whatsapp_decision_notice_retry_requested"
+                if message_kind == "decision_notice"
                 else "whatsapp_number_retry_requested"
             ),
             actor=actor,

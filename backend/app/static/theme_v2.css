@@ -310,3 +310,23 @@ th { color:#c9a227; font-size:12px; text-transform:uppercase; letter-spacing:.05
   .autopilot-case { align-items:flex-start; flex-direction:column; }
   .autopilot-last { text-align:left; }
 }
+
+.whatsapp-decision-panel { border-left:4px solid #25d366; }
+.whatsapp-decision-panel textarea {
+  width:100%;
+  min-height:96px;
+  resize:vertical;
+  margin:10px 0 12px;
+  background:#0e0e0e;
+  color:#f4f4f4;
+  border:1px solid #3a3a3a;
+  border-radius:8px;
+  padding:12px;
+  line-height:1.5;
+}
+.whatsapp-sent-body {
+  margin-top:8px;
+  white-space:pre-wrap;
+  color:#cfcfcf;
+  font-weight:500;
+}
