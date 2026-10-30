@@ -56,6 +56,12 @@ BUSINESS_DECISIONS = {
         "requires_supplier": True,
         "default_discount": 50,
     },
+    "second_grade_no_claim": {
+        "label": "II gatunek – brak możliwości reklamacji",
+        "description": "Nie można wskazać miejsca powstania wady / uszkodzenia, więc brak podstaw do reklamacji u dostawcy.",
+        "requires_supplier": False,
+        "default_discount": None,
+    },
 }
 WHATSAPP_RESOLUTIONS = {
     "use_first_grade_next_pavilions": "Wykorzystać na 1 gatunek w następnych pawilonach.",

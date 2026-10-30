@@ -632,7 +632,8 @@ def set_resolution_strategy_action(
         db.flush()
         ensure_missing_data_question(db, complaint, group_id=settings.whatsapp_group_id)
         auto_prepare_supplier_workflow(db, complaint, actor="system")
-        if latest_supplier_email(complaint) is not None:
+        decision = BUSINESS_DECISIONS.get(complaint.resolution_strategy or "")
+        if decision and decision["requires_supplier"] and latest_supplier_email(complaint) is not None:
             try:
                 generate_supplier_reply(db, complaint, actor="system:decision")
             except RuntimeError:

@@ -39,7 +39,13 @@ def derive_autopilot(complaint: Complaint) -> dict[str, Any]:
         latest_supplier["source_id"] if latest_supplier else None,
     )
 
-    if complaint.merged_into_id is not None or complaint.status == ComplaintStatus.CLOSED:
+    if complaint.resolution_strategy == "second_grade_no_claim":
+        bucket = "closed"
+        label = "Zamknięte"
+        headline = "II gatunek – brak możliwości reklamacji"
+        next_action = "Brak podstaw do reklamacji u dostawcy — nie można wskazać miejsca powstania wady / uszkodzenia."
+        tone = "closed"
+    elif complaint.merged_into_id is not None or complaint.status == ComplaintStatus.CLOSED:
         bucket = "closed"
         label = "Zamknięte"
         headline = "Sprawa zakończona"
