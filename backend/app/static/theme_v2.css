@@ -330,3 +330,11 @@ th { color:#c9a227; font-size:12px; text-transform:uppercase; letter-spacing:.05
   color:#cfcfcf;
   font-weight:500;
 }
+
+/* The supplier email workflow is a primary action, not an advanced tool. */
+.supplier-mail-shortcut {
+  border-left: 4px solid #c9a227;
+  margin-bottom: 14px;
+}
+.supplier-mail-shortcut > p { margin: 12px 0; }
+.supplier-mail-shortcut .button { margin-top: 4px; }

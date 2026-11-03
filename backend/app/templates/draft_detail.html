@@ -69,6 +69,127 @@
     </section>
   </div>
 
+  {% if not complaint.merged_into %}
+  <section class="panel supplier-mail-shortcut" id="paneltech-mail">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Reklamacja do dostawcy</p>
+        <h2>Wyślij reklamację do Paneltech</h2>
+      </div>
+      {% if complaint.supplier %}<span class="badge">{{ complaint.supplier.name }}</span>{% endif %}
+    </div>
+    {% if complaint.resolution_strategy == 'second_grade_no_claim' %}
+      <p>Wybrano zamknięcie wewnętrzne bez reklamacji do dostawcy. Nie przygotowujemy e-maila.</p>
+    {% elif not complaint.resolution_strategy %}
+      <p>Najpierw wybierz decyzję dotyczącą płyt w sekcji „Narzędzia zaawansowane”. Następnie przygotujesz e-mail do dostawcy.</p>
+    {% elif complaint.resolution_strategy == 'reuse_first_grade' %}
+      <p>Ta ścieżka nie wymaga zgłoszenia do Paneltech. Jeśli chcesz reklamować płyty u dostawcy, zmień decyzję.</p>
+    {% elif complaint.status.value == 'draft' %}
+      <p>Zgłoszenie wymaga akceptacji, zanim przygotujemy e-mail do Paneltech.</p>
+      <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/status">
+        <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+        <input type="hidden" name="target_status" value="pending_approval">
+        <button class="button" type="submit">Przekaż do akceptacji</button>
+      </form>
+    {% elif complaint.status.value == 'pending_approval' %}
+      <p>Decyzja wewnętrzna: <strong>{{ business_decisions.get(complaint.resolution_strategy, {}).get('label', complaint.resolution_strategy) }}</strong>. Sprawdź decyzję i dane przed wysłaniem.</p>
+      <p>Po akceptacji system nada numer reklamacji i przygotuje e-mail ze zdjęciami, jeśli wymagane dane są kompletne.</p>
+      <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/accept" onsubmit="return confirm('Zaakceptować reklamację i przygotować e-mail do Paneltech? Na WhatsApp wyślemy też potwierdzenie numeru.')">
+        <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+        <button class="button" type="submit">Akceptuj i przygotuj reklamację</button>
+      </form>
+    {% elif complaint.status.value == 'accepted' and missing_fields %}
+      <p class="notice warning">Do przygotowania e-maila brakuje danych: {% for field in missing_fields %}{{ missing_field_labels.get(field, field) }}{% if not loop.last %}, {% endif %}{% endfor %}. Uzupełnij je ręcznie w karcie poniżej.</p>
+    {% elif complaint.status.value == 'ready_to_send' and email_draft %}
+      <p>Sprawdź treść wiadomości i załączniki poniżej, a następnie zapisz zmiany i pobierz e-mail.</p>
+    {% elif complaint.status.value in ['sent', 'closed'] %}
+      <p>Reklamacja została oznaczona jako wysłana lub zakończona. Stan korespondencji znajduje się poniżej.</p>
+    {% else %}
+      <p>Przygotuj e-mail i zweryfikuj treść przed wysłaniem.</p>
+    {% endif %}
+    {% if complaint.resolution_strategy in ['return_to_supplier', 'keep_request_discount', 'second_grade_50'] and not smtp_configured and complaint.status.value not in ['sent', 'closed'] %}
+      <p class="muted">Wysyłka bezpośrednio z VPS nie jest jeszcze aktywna (brak konfiguracji SMTP). Po przygotowaniu szkicu pobierz e-mail .eml ze zdjęciami i wyślij go ze swojej poczty.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+    {% if complaint.status.value == 'accepted' and complaint.resolution_strategy in ['return_to_supplier', 'keep_request_discount', 'second_grade_50'] %}
+      <section class="panel correspondence-panel">
+        <h2>Reklamacja do Paneltech</h2>
+        {% if missing_fields %}
+          <p class="muted">Czekamy na brakujące dane z WhatsApp. Po ich uzupełnieniu szkic wiadomości powstanie automatycznie.</p>
+        {% elif not complaint.supplier %}
+          <p class="muted">Dane są kompletne. Przypisz dostawcę Paneltech, aby system przygotował szkic automatycznie.</p>
+        {% else %}
+          <p class="muted">Dane są kompletne. Jeżeli automatyczny szkic nie powstał, możesz przygotować go ręcznie.</p>
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/prepare-email">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="button secondary" type="submit">Przygotuj szkic ręcznie</button>
+          </form>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if email_draft %}
+      <section class="panel correspondence-panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">Korespondencja</p><h2>Szkic do dostawcy</h2></div>
+          <span class="badge">{{ attachments|selectattr('include_in_email')|list|length }} załączników</span>
+        </div>
+        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/email-draft">
+          <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+          <div class="form-grid">
+            <label>Do<input name="recipient" type="email" value="{{ email_draft.recipient }}" {% if complaint.status.value != 'ready_to_send' or email_outbox %}disabled{% endif %}></label>
+            <label>Temat<input name="subject" value="{{ email_draft.subject }}" {% if complaint.status.value != 'ready_to_send' or email_outbox %}disabled{% endif %}></label>
+            <label class="wide">Treść<textarea id="email-body" name="body" rows="14" {% if complaint.status.value != 'ready_to_send' or email_outbox %}disabled{% endif %}>{{ email_draft.body }}</textarea></label>
+          </div>
+          {% if complaint.status.value == 'ready_to_send' and not email_outbox %}<button class="button secondary" type="submit">Zapisz szkic</button>{% endif %}
+        </form>
+        <div class="correspondence-actions">
+          <button class="button secondary" id="copy-email-body" type="button">Kopiuj treść</button>
+          <a class="button" href="{{ root_path }}/drafts/{{ complaint.id }}/email.eml">Pobierz e-mail ze zdjęciami</a>
+          {% if complaint.status.value == 'ready_to_send' and not email_outbox %}
+            {% if smtp_configured %}
+              <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/send-smtp" onsubmit="return confirm('Wysłać tę wiadomość wraz z wybranymi zdjęciami?')">
+                <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+                <button class="button" type="submit">Akceptuj i wyślij e-mail</button>
+              </form>
+            {% endif %}
+            <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/mark-sent" onsubmit="return confirm('Potwierdzasz, że wiadomość została wysłana ręcznie?')">
+              <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+              <button class="button secondary" type="submit">Oznacz wysyłkę ręczną</button>
+            </form>
+          {% endif %}
+        </div>
+        {% if complaint.status.value == 'ready_to_send' and not smtp_configured and not email_outbox %}
+          <p class="muted">Automatyczna wysyłka będzie dostępna po skonfigurowaniu skrzynki SMTP.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if email_outbox %}
+      <section class="notice {{ 'success' if email_outbox.status == 'sent' else 'warning' }}">
+        SMTP:
+        {% if email_outbox.status == 'pending' %}wiadomość oczekuje w kolejce
+        {% elif email_outbox.status == 'processing' %}trwa wysyłanie
+        {% elif email_outbox.status == 'sent' %}serwer pocztowy przyjął wiadomość
+        {% elif email_outbox.status == 'failed' %}wysyłka jednoznacznie się nie powiodła
+        {% else %}wynik wysyłki jest niejednoznaczny — sprawdź skrzynkę „Wysłane” przed dalszym działaniem{% endif %}.
+        {% if email_outbox.status == 'failed' %}
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/retry-smtp">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="button secondary" type="submit">Ponów wysyłkę SMTP</button>
+          </form>
+        {% endif %}
+        {% if email_outbox.status in ['failed', 'unknown'] %}
+          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/mark-sent" onsubmit="return confirm('Potwierdzasz ręcznie, że wiadomość została wysłana?')">
+            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+            <button class="button secondary" type="submit">Potwierdź wysyłkę ręczną</button>
+          </form>
+        {% endif %}
+      </section>
+    {% endif %}
+
   {% if complaint.resolution_strategy %}
     <section class="panel whatsapp-decision-panel">
       <div class="section-heading compact">
@@ -470,83 +591,6 @@
               <button class="button secondary" type="submit">Ponów wysyłkę statusu</button>
             </form>
           {% endif %}
-        {% endif %}
-      </section>
-    {% endif %}
-
-    {% if complaint.status.value == 'accepted' and complaint.resolution_strategy in ['return_to_supplier', 'keep_request_discount', 'second_grade_50'] %}
-      <section class="panel correspondence-panel">
-        <h2>Reklamacja do Paneltech</h2>
-        {% if missing_fields %}
-          <p class="muted">Czekamy na brakujące dane z WhatsApp. Po ich uzupełnieniu szkic wiadomości powstanie automatycznie.</p>
-        {% elif not complaint.supplier %}
-          <p class="muted">Dane są kompletne. Przypisz dostawcę Paneltech, aby system przygotował szkic automatycznie.</p>
-        {% else %}
-          <p class="muted">Dane są kompletne. Jeżeli automatyczny szkic nie powstał, możesz przygotować go ręcznie.</p>
-          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/prepare-email">
-            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-            <button class="button secondary" type="submit">Przygotuj szkic ręcznie</button>
-          </form>
-        {% endif %}
-      </section>
-    {% endif %}
-
-    {% if email_draft %}
-      <section class="panel correspondence-panel">
-        <div class="section-heading">
-          <div><p class="eyebrow">Korespondencja</p><h2>Szkic do dostawcy</h2></div>
-          <span class="badge">{{ attachments|selectattr('include_in_email')|list|length }} załączników</span>
-        </div>
-        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/email-draft">
-          <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-          <div class="form-grid">
-            <label>Do<input name="recipient" type="email" value="{{ email_draft.recipient }}" {% if complaint.status.value != 'ready_to_send' or email_outbox %}disabled{% endif %}></label>
-            <label>Temat<input name="subject" value="{{ email_draft.subject }}" {% if complaint.status.value != 'ready_to_send' or email_outbox %}disabled{% endif %}></label>
-            <label class="wide">Treść<textarea id="email-body" name="body" rows="14" {% if complaint.status.value != 'ready_to_send' or email_outbox %}disabled{% endif %}>{{ email_draft.body }}</textarea></label>
-          </div>
-          {% if complaint.status.value == 'ready_to_send' and not email_outbox %}<button class="button secondary" type="submit">Zapisz szkic</button>{% endif %}
-        </form>
-        <div class="correspondence-actions">
-          <button class="button secondary" id="copy-email-body" type="button">Kopiuj treść</button>
-          <a class="button" href="{{ root_path }}/drafts/{{ complaint.id }}/email.eml">Pobierz e-mail ze zdjęciami</a>
-          {% if complaint.status.value == 'ready_to_send' and not email_outbox %}
-            {% if smtp_configured %}
-              <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/send-smtp" onsubmit="return confirm('Wysłać tę wiadomość wraz z wybranymi zdjęciami?')">
-                <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-                <button class="button" type="submit">Akceptuj i wyślij e-mail</button>
-              </form>
-            {% endif %}
-            <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/mark-sent" onsubmit="return confirm('Potwierdzasz, że wiadomość została wysłana ręcznie?')">
-              <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-              <button class="button secondary" type="submit">Oznacz wysyłkę ręczną</button>
-            </form>
-          {% endif %}
-        </div>
-        {% if complaint.status.value == 'ready_to_send' and not smtp_configured and not email_outbox %}
-          <p class="muted">Automatyczna wysyłka będzie dostępna po skonfigurowaniu skrzynki SMTP.</p>
-        {% endif %}
-      </section>
-    {% endif %}
-
-    {% if email_outbox %}
-      <section class="notice {{ 'success' if email_outbox.status == 'sent' else 'warning' }}">
-        SMTP:
-        {% if email_outbox.status == 'pending' %}wiadomość oczekuje w kolejce
-        {% elif email_outbox.status == 'processing' %}trwa wysyłanie
-        {% elif email_outbox.status == 'sent' %}serwer pocztowy przyjął wiadomość
-        {% elif email_outbox.status == 'failed' %}wysyłka jednoznacznie się nie powiodła
-        {% else %}wynik wysyłki jest niejednoznaczny — sprawdź skrzynkę „Wysłane” przed dalszym działaniem{% endif %}.
-        {% if email_outbox.status == 'failed' %}
-          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/retry-smtp">
-            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-            <button class="button secondary" type="submit">Ponów wysyłkę SMTP</button>
-          </form>
-        {% endif %}
-        {% if email_outbox.status in ['failed', 'unknown'] %}
-          <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/mark-sent" onsubmit="return confirm('Potwierdzasz ręcznie, że wiadomość została wysłana?')">
-            <input type="hidden" name="action_token" value="{{ panel_action_token }}">
-            <button class="button secondary" type="submit">Potwierdź wysyłkę ręczną</button>
-          </form>
         {% endif %}
       </section>
     {% endif %}
