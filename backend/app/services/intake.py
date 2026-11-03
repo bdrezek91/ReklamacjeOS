@@ -7,7 +7,7 @@ from ..models import Complaint, ComplaintEvent, ComplaintField, WhatsAppOutbox
 
 DEFECT_WORDS = (
     "uszkodz", "wgniec", "porys", "rysa", "zamek", "odcie", "piank",
-    "grad", "pęk", "pek", "odkle", "deform", "wada", "reklamac", "zarys",
+    "grad", "pęk", "pek", "odkle", "deform", "wada", "reklamac", "zarys", "rys",
 )
 FIELD_LABELS = {
     "quantity": "ilość sztuk",
@@ -36,10 +36,24 @@ def extract_fields_from_text(text: str) -> dict[str, str]:
     if dimensions:
         parts = [part for part in dimensions.groups() if part]
         result["dimensions"] = " x ".join(parts)
+    else:
+        single_size = re.search(
+            r"\b(?:dach|płyt[ayę]|panel)\s+(\d{3,5})\s*mm\b",
+            source, re.IGNORECASE,
+        )
+        if single_size:
+            result["dimensions"] = f"{single_size.group(1)} mm"
 
     order = re.search(r"\bZS[\s-]?(\d{3,6})\b", source, re.IGNORECASE)
     if order:
         result["paneltech_order_number"] = f"ZS-{order.group(1)}".upper()
+    else:
+        generic_order = re.search(
+            r"\bzam[oó]wieni[ae]\s*(?:nr\.?)?\s*[:#-]?\s*(\d{3,8})\b",
+            source, re.IGNORECASE,
+        )
+        if generic_order:
+            result["document_number"] = f"Zamówienie nr {generic_order.group(1)}"
 
     package = re.search(
         r"\b(?:nr\s*)?paczk(?:a|i|ę|e)\s*(?:nr\s*)?[:#-]?\s*([A-Z0-9][A-Z0-9/_-]{2,})",
@@ -55,6 +69,8 @@ def extract_fields_from_text(text: str) -> dict[str, str]:
     )
     if material:
         result["material_product"] = _clean(material.group(1))
+    elif re.search(r"\bdach\s+\d{3,5}\s*mm\b", source, re.IGNORECASE):
+        result["material_product"] = "Płyta dachowa"
 
     sentences = [part.strip() for part in re.split(r"[\n.!?]+", source) if part.strip()]
     defect_sentences = [

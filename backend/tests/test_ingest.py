@@ -107,3 +107,15 @@ def test_saves_original_image(tmp_path):
     assert len(message.attachments) == 1
     stored = tmp_path / message.attachments[0].storage_path
     assert stored.read_bytes() == b"fake-jpeg-content"
+
+
+
+def test_extract_recovered_whatsapp_roof_report():
+    from app.services.intake import extract_fields_from_text
+
+    result = extract_fields_from_text("Dach 2480mm. Liczne rysy. 3 szt. Zamówienie nr. 4720")
+    assert result["quantity"] == "3 szt."
+    assert result["dimensions"] == "2480 mm"
+    assert result["material_product"] == "Płyta dachowa"
+    assert result["defect_description"] == "Liczne rysy"
+    assert result["document_number"] == "Zamówienie nr 4720"

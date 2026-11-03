@@ -157,6 +157,7 @@ services:
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       HEALTH_PORT: ${HEALTH_PORT:-3001}
     volumes:
+      - ./whatsapp-bridge/src:/app/src:ro
       - whatsapp_session:/app/session
     depends_on:
       backend:

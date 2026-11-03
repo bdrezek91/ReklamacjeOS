@@ -7,9 +7,13 @@ const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const { shouldIgnoreMessage } = require("./message_filter");
 const { retryDelayMs } = require("./retry");
+const { createInboxSpool } = require("./inbox_spool");
 
 const OUTBOX_POLL_INTERVAL_MS = 5000;
 const OUTBOX_MAX_RETRY_MS = 60000;
+const INBOX_RECOVERY_INTERVAL_MS = 5 * 60 * 1000;
+const INBOX_RECOVERY_LIMIT = 300;
+const INBOX_RECOVERY_LOOKBACK_DAYS = 14;
 
 const config = {
   backendUrl: (process.env.BACKEND_URL || "http://backend:8000").replace(/\/$/, ""),
@@ -49,7 +53,11 @@ const client = new Client({
   },
 });
 
+const inboxSpool = createInboxSpool(config.sessionPath);
 const processing = new Set();
+let inboxRecoveryTimer = null;
+let inboxRecoveryBusy = false;
+let pendingDeliveryBusy = false;
 let whatsappReady = false;
 let outboxPolling = false;
 let outboxTimer = null;
@@ -137,15 +145,47 @@ function fileNameFor(media, messageId) {
   return media.filename || `${messageId.replace(/[^A-Za-z0-9_.-]/g, "_")}.${extension}`;
 }
 
-async function forwardMessage(message) {
+async function submitInboxRecord(record) {
+  const form = new FormData();
+  for (const key of [
+    "wa_message_id", "group_id", "group_name", "author_id", "author_name",
+    "body", "message_type", "source_timestamp", "source_payload",
+  ]) {
+    form.append(key, String(record[key] ?? ""));
+  }
+  if (record.quoted_message_id) form.append("quoted_message_id", record.quoted_message_id);
+  if (record.media) {
+    form.append("media", Buffer.from(record.media.base64, "base64"), {
+      filename: record.media.filename,
+      contentType: record.media.mimeType,
+    });
+  }
+  const response = await axios.post(`${config.backendUrl}/api/internal/whatsapp/messages`, form, {
+    headers: { ...form.getHeaders(), Authorization: `Bearer ${config.token}` },
+    maxBodyLength: config.maxUploadBytes + 1024 * 1024,
+    timeout: 60000,
+    validateStatus: (status) => status < 500,
+  });
+  if (response.status >= 400) {
+    throw new Error(`Backend rejected message (${response.status}): ${JSON.stringify(response.data)}`);
+  }
+  inboxSpool.markDelivered(record.wa_message_id);
+  log(response.data.created ? "Zapisano wiadomość" : "Wiadomość już istnieje", {
+    messageId: record.wa_message_id,
+    complaintId: response.data.complaint_id ?? null,
+    source: record.recovery_source || "live",
+  });
+}
+
+async function forwardMessage(message, source = "live") {
   const messageId = message.id?._serialized;
-  if (!messageId || processing.has(messageId) || shouldIgnoreMessage(message)) return;
+  if (!messageId || processing.has(messageId) || shouldIgnoreMessage(message) ||
+      inboxSpool.isDelivered(messageId)) return;
   processing.add(messageId);
 
   try {
     const chat = await message.getChat();
     if (!chat.isGroup) return;
-
     const groupId = chat.id._serialized;
     if (!config.groupId || groupId !== config.groupId) return;
 
@@ -156,59 +196,113 @@ async function forwardMessage(message) {
       quotedMessageId = quoted?.id?._serialized || null;
     }
 
-    const form = new FormData();
-    form.append("wa_message_id", messageId);
-    form.append("group_id", groupId);
-    form.append("group_name", chat.name || "");
-    form.append("author_id", message.author || message.from || "");
-    form.append("author_name", contact?.pushname || contact?.name || contact?.shortName || "");
-    form.append("body", message.body || "");
-    form.append("message_type", message.type || "unknown");
-    if (quotedMessageId) form.append("quoted_message_id", quotedMessageId);
-    form.append("source_timestamp", new Date(message.timestamp * 1000).toISOString());
-    form.append(
-      "source_payload",
-      JSON.stringify({
+    const record = {
+      wa_message_id: messageId,
+      group_id: groupId,
+      group_name: chat.name || "",
+      author_id: message.author || message.from || "",
+      author_name: contact?.pushname || contact?.name || contact?.shortName || "",
+      body: message.body || "",
+      message_type: message.type || "unknown",
+      quoted_message_id: quotedMessageId,
+      source_timestamp: new Date(message.timestamp * 1000).toISOString(),
+      source_payload: JSON.stringify({
         fromMe: Boolean(message.fromMe),
         hasMedia: Boolean(message.hasMedia),
         hasQuotedMsg: Boolean(message.hasQuotedMsg),
         deviceType: message.deviceType || null,
       }),
-    );
+      recovery_source: source,
+    };
 
     if (message.hasMedia) {
       const media = await message.downloadMedia();
       if (!media) throw new Error("WhatsApp did not return media data");
       if (!media.mimetype.startsWith("image/")) {
         log("Pominięto nieobsługiwane medium; tekst/metadane wiadomości zostaną zapisane", {
-          messageId,
-          mimeType: media.mimetype,
+          messageId, mimeType: media.mimetype,
         });
       } else {
         const buffer = Buffer.from(media.data, "base64");
-        if (buffer.length > config.maxUploadBytes) {
-          throw new Error(`Media exceeds configured limit (${buffer.length} bytes)`);
-        }
-        form.append("media", buffer, { filename: fileNameFor(media, messageId), contentType: media.mimetype });
+        if (buffer.length > config.maxUploadBytes) throw new Error(`Media exceeds configured limit (${buffer.length} bytes)`);
+        record.media = {
+          base64: media.data,
+          filename: fileNameFor(media, messageId),
+          mimeType: media.mimetype,
+        };
       }
     }
 
-    const response = await axios.post(`${config.backendUrl}/api/internal/whatsapp/messages`, form, {
-      headers: { ...form.getHeaders(), Authorization: `Bearer ${config.token}` },
-      maxBodyLength: config.maxUploadBytes + 1024 * 1024,
-      timeout: 60000,
-      validateStatus: (status) => status < 500,
-    });
-
-    if (response.status >= 400) {
-      throw new Error(`Backend rejected message (${response.status}): ${JSON.stringify(response.data)}`);
+    // Persist before network transmission. An offline backend must not lose the event.
+    inboxSpool.persist(record);
+    try {
+      await submitInboxRecord(record);
+    } catch (error) {
+      log("Wiadomość zachowana do ponowienia", { messageId, error: error.message });
     }
-    log(response.data.created ? "Zapisano wiadomość" : "Wiadomość już istnieje", { messageId });
   } catch (error) {
     log("Błąd przetwarzania wiadomości", { messageId, error: error.message });
   } finally {
     processing.delete(messageId);
   }
+}
+
+async function flushInboxSpool() {
+  if (pendingDeliveryBusy) return;
+  pendingDeliveryBusy = true;
+  try {
+    const records = inboxSpool.pending(150);
+    for (const record of records) {
+      if (processing.has(record.wa_message_id)) continue;
+      try {
+        await submitInboxRecord(record);
+      } catch (error) {
+        log("Odroczono dostarczenie wiadomości WhatsApp", {
+          messageId: record.wa_message_id, error: error.message,
+        });
+        break;
+      }
+    }
+  } catch (error) {
+    log("Błąd trwałej kolejki przychodzącej", { error: error.message });
+  } finally {
+    pendingDeliveryBusy = false;
+  }
+}
+
+async function recoverGroupHistory() {
+  if (!whatsappReady || inboxRecoveryBusy || !config.groupId) return;
+  inboxRecoveryBusy = true;
+  try {
+    await flushInboxSpool();
+    const chat = await client.getChatById(config.groupId);
+    const messages = await chat.fetchMessages({ limit: INBOX_RECOVERY_LIMIT });
+    const cutoff = Math.floor(Date.now() / 1000) - INBOX_RECOVERY_LOOKBACK_DAYS * 86400;
+    let scanned = 0;
+    let candidates = 0;
+    for (const message of messages.sort((a, b) => a.timestamp - b.timestamp)) {
+      if (!message.timestamp || message.timestamp < cutoff) continue;
+      scanned++;
+      const id = message.id?._serialized;
+      if (!id || shouldIgnoreMessage(message) || inboxSpool.isDelivered(id)) continue;
+      candidates++;
+      await forwardMessage(message, "history");
+    }
+    await flushInboxSpool();
+    log("Sprawdzono historię grupy reklamacyjnej", { scanned, candidates });
+  } catch (error) {
+    log("Błąd synchronizacji historii grupy reklamacyjnej", { error: error.message });
+  } finally {
+    inboxRecoveryBusy = false;
+  }
+}
+
+function startInboxRecovery() {
+  if (inboxRecoveryTimer) clearInterval(inboxRecoveryTimer);
+  inboxRecoveryTimer = setInterval(() => {
+    recoverGroupHistory().catch((error) => log("Błąd historii WhatsApp", { error: error.message }));
+  }, INBOX_RECOVERY_INTERVAL_MS);
+  recoverGroupHistory().catch((error) => log("Błąd startowej synchronizacji WhatsApp", { error: error.message }));
 }
 
 async function reportOutboxResult(itemId, result, data) {
@@ -320,6 +414,7 @@ client.on("disconnected", (reason) => {
 client.on("ready", async () => {
   whatsappReady = true;
   log("WhatsApp bridge gotowy");
+  startInboxRecovery();
   await printGroups().catch((error) => log("Nie udało się pobrać grup", { error: error.message }));
   await pollOutbox();
   scheduleOutboxPoll(outboxRetryDelayMs);
@@ -333,6 +428,7 @@ client.on("message_create", forwardMessage);
 process.on("SIGTERM", async () => {
   whatsappReady = false;
   if (outboxTimer) clearTimeout(outboxTimer);
+  if (inboxRecoveryTimer) clearInterval(inboxRecoveryTimer);
   log("Zamykanie bridge");
   healthServer.close();
   await client.destroy();
