@@ -145,6 +145,15 @@
           </div>
           {% if complaint.status.value == 'ready_to_send' and not email_outbox %}<button class="button secondary" type="submit">Zapisz szkic</button>{% endif %}
         </form>
+        {% if not email_outbox %}
+          <div class="mail-signature-preview">
+            <strong>Stopka firmowa — dołączana automatycznie przy wysyłce</strong>
+            <p class="muted">Taka sama jak w PłytyOS: dane kontaktowe, baner firmowy i informacja RODO. Nie trzeba jej dopisywać do treści.</p>
+            <img src="{{ root_path }}/static/signature_banner.jpg" alt="Stopka firmowa Dampol Investment" loading="lazy">
+          </div>
+        {% else %}
+          <p class="muted">Wysłana wiadomość zachowuje treść z chwili wysyłki. Nowa stopka dotyczy kolejnych reklamacji.</p>
+        {% endif %}
         <div class="correspondence-actions">
           <button class="button secondary" id="copy-email-body" type="button">Kopiuj treść</button>
           <a class="button" href="{{ root_path }}/drafts/{{ complaint.id }}/email.eml">Pobierz e-mail ze zdjęciami</a>

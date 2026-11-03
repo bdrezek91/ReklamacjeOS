@@ -14,6 +14,7 @@ from sqlalchemy import select
 from .config import settings
 from .db import SessionLocal
 from .models import Complaint, ComplaintEvent, ComplaintStatus, EmailOutbox, EmailSent
+from .services.signature import set_message_content
 
 RUNNING = True
 READY_FILE = Path("/tmp/email-worker-ready")
@@ -68,7 +69,7 @@ def build_message(item: EmailOutbox) -> EmailMessage:
     message["Subject"] = item.subject
     message["Message-ID"] = item.message_id
     message["Date"] = formatdate(localtime=True)
-    message.set_content(item.body)
+    set_message_content(message, item.body)
     for metadata in item.attachments:
         mime_type = str(metadata.get("mime_type") or "application/octet-stream")
         main_type, sub_type = (mime_type.split("/", 1) + ["octet-stream"])[:2]
@@ -207,6 +208,14 @@ def main() -> None:
         else:
             mark_sent(item.id)
             log("Serwer SMTP przyjął wiadomość", outbox_id=item.id)
+            # A raw SMTP submission does not populate Outlook's Sent folder.
+            # Archiving is independent of delivery and must never trigger SMTP retry.
+            try:
+                from .services.sent_copy import archive_outbox
+                copy_result = archive_outbox(item.id)
+                log("Zapisano kopię w folderze Wysłane", outbox_id=item.id, **copy_result)
+            except Exception as error:
+                log("Nie zapisano kopii w Wysłanych; SMTP już przyjął wiadomość", outbox_id=item.id, error_type=type(error).__name__)
 
     READY_FILE.unlink(missing_ok=True)
     log("Worker SMTP zatrzymany")

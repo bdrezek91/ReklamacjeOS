@@ -929,7 +929,15 @@ def download_email(complaint_id: int, db: Session = Depends(get_db)) -> Response
     message["To"] = draft.recipient
     message["Subject"] = draft.subject
     message["X-Unsent"] = "1"
-    message.set_content(draft.body)
+    from .services.signature import compose_body, set_message_content
+    # A downloaded historical .eml must match the already-sent snapshot.
+    outbox = db.scalar(select(EmailOutbox).where(EmailOutbox.complaint_id == complaint_id))
+    body = (
+        outbox.body if outbox is not None
+        else compose_body(draft.body) if complaint.status == ComplaintStatus.READY_TO_SEND
+        else draft.body
+    )
+    set_message_content(message, body)
     root = settings.data_root.resolve()
     for attachment in selected_attachments(db, complaint.id):
         path = (settings.data_root / attachment.storage_path).resolve()

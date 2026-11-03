@@ -273,12 +273,14 @@ def enqueue_smtp_email(
     clean_sender = validate_email(sender)
     attachments = selected_attachments(db, complaint.id)
     sender_domain = clean_sender.rsplit("@", 1)[-1]
+    from .signature import compose_body
+
     item = EmailOutbox(
         complaint_id=complaint.id,
         recipient=draft.recipient,
         sender=clean_sender,
         subject=draft.subject,
-        body=draft.body,
+        body=compose_body(draft.body),
         attachments=[
             {
                 "id": attachment.id,

@@ -60,6 +60,7 @@ services:
       TYPESAFE_TIMEOUT_SECONDS: ${TYPESAFE_TIMEOUT_SECONDS:-15}
       TZ: ${TZ:-Europe/Warsaw}
     volumes:
+      - ./backend/app:/app/app:ro
       - complaint_data:/data/reklamacje
       - ./.secrets/typesafe_api_key:/run/secrets/typesafe_api_key:ro
     depends_on:
@@ -102,6 +103,7 @@ services:
       EMAIL_WORKER_INTERVAL_SECONDS: ${EMAIL_WORKER_INTERVAL_SECONDS:-5}
       TZ: ${TZ:-Europe/Warsaw}
     volumes:
+      - ./backend/app:/app/app:ro
       - complaint_data:/data/reklamacje:ro
       - ./.secrets/smtp_password:/run/secrets/smtp_password:ro
     depends_on:

@@ -336,5 +336,19 @@ th { color:#c9a227; font-size:12px; text-transform:uppercase; letter-spacing:.05
   border-left: 4px solid #c9a227;
   margin-bottom: 14px;
 }
+.mail-signature-preview {
+  margin:14px 0;
+  padding:12px;
+  border:1px solid #353535;
+  border-radius:10px;
+}
+.mail-signature-preview img {
+  max-width:100%;
+  width:640px;
+  height:auto;
+  background:#fff;
+  display:block;
+  margin-top:10px;
+}
 .supplier-mail-shortcut > p { margin: 12px 0; }
 .supplier-mail-shortcut .button { margin-top: 4px; }
