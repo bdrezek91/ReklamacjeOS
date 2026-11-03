@@ -147,38 +147,5 @@ def ensure_missing_data_question(
     *,
     group_id: str,
 ) -> WhatsAppOutbox | None:
-    missing = missing_required_fields(complaint)
-    if not missing or not group_id:
-        return None
-    existing = db.scalar(
-        select(WhatsAppOutbox).where(
-            WhatsAppOutbox.complaint_id == complaint.id,
-            WhatsAppOutbox.message_kind == "missing_data",
-        )
-    )
-    if existing is not None:
-        return existing
-    label = complaint.official_number or f"Reklamacja {complaint.id:04d}"
-    readable = "; ".join(FIELD_LABELS[item] for item in missing)
-    body = (
-        f"{label} — brakuje danych do dalszej obsługi: {readable}. "
-        "Proszę uzupełnić je w jednej wiadomości i, jeśli jest dostępna, dodać zdjęcie etykiety/paczki."
-    )
-    item = WhatsAppOutbox(
-        complaint_id=complaint.id,
-        group_id=group_id,
-        body=body,
-        message_kind="missing_data",
-        status="pending",
-    )
-    db.add(item)
-    db.add(
-        ComplaintEvent(
-            complaint_id=complaint.id,
-            event_type="missing_data_question_queued",
-            actor="system:intake",
-            details={"missing_fields": missing},
-        )
-    )
-    db.flush()
-    return item
+    """Manual clarification only: never queue WhatsApp missing-data questions."""
+    return None

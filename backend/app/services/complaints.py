@@ -261,9 +261,7 @@ def accept_complaint(
 
     local_time = accepted_at or datetime.now(WARSAW)
     official_number = allocate_monthly_number(db, year=local_time.year, month=local_time.month)
-    body = (
-        f"Przyjęto reklamację nr {official_number}. Proszę opisać reklamowane płyty: reklamacja nr {official_number}."
-    )
+    body = f"Przyjęto reklamację nr {official_number}."
 
     complaint.official_number = official_number
     complaint.status = ComplaintStatus.ACCEPTED

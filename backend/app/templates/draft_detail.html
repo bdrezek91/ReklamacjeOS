@@ -200,7 +200,7 @@
         <strong>{{ 'Brakuje danych do dalszej obsługi' if missing_fields else 'Dane podstawowe są kompletne' }}</strong>
         <p>
           {% if missing_fields %}
-            System przygotował jedno zbiorcze pytanie na WhatsApp. Po uzupełnieniu danych karta zostanie automatycznie zasilona.
+            Brakujące dane możesz uzupełnić ręcznie w karcie. System nie wysyła automatycznych pytań na WhatsApp.
           {% elif complaint.resolution_strategy in ['return_to_supplier', 'keep_request_discount', 'second_grade_50'] %}
             Dla ścieżki z Paneltechem szkic e-maila może zostać przygotowany automatycznie.
           {% else %}
