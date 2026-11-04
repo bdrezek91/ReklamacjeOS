@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .db import SessionLocal
-from .models import Complaint, ComplaintEvent, ComplaintStatus, EmailOutbox, EmailSent
+from .models import Complaint, ComplaintEvent, ComplaintStatus, EmailOutbox, EmailSent, SupplierReplyOutbox
 from .services.signature import set_message_content
 
 RUNNING = True
@@ -62,15 +62,18 @@ def attachment_bytes(metadata: dict[str, object]) -> bytes:
     return content
 
 
-def build_message(item: EmailOutbox) -> EmailMessage:
+def build_message(item: EmailOutbox | SupplierReplyOutbox) -> EmailMessage:
     message = EmailMessage()
     message["From"] = formataddr((settings.smtp_from_name, item.sender))
     message["To"] = item.recipient
     message["Subject"] = item.subject
     message["Message-ID"] = item.message_id
     message["Date"] = formatdate(localtime=True)
+    if isinstance(item, SupplierReplyOutbox):
+        message["In-Reply-To"] = item.in_reply_to
+        message["References"] = item.references
     set_message_content(message, item.body)
-    for metadata in item.attachments:
+    for metadata in getattr(item, "attachments", []):
         mime_type = str(metadata.get("mime_type") or "application/octet-stream")
         main_type, sub_type = (mime_type.split("/", 1) + ["octet-stream"])[:2]
         message.add_attachment(
@@ -82,7 +85,7 @@ def build_message(item: EmailOutbox) -> EmailMessage:
     return message
 
 
-def deliver(item: EmailOutbox) -> None:
+def deliver(item: EmailOutbox | SupplierReplyOutbox) -> None:
     message = build_message(item)
     context = ssl.create_default_context()
     smtp_class = smtplib.SMTP_SSL if settings.smtp_ssl else smtplib.SMTP
@@ -177,6 +180,70 @@ def mark_error(item_id: int, error: Exception, *, ambiguous: bool) -> None:
         )
 
 
+
+def claim_next_supplier_reply() -> SupplierReplyOutbox | None:
+    with SessionLocal.begin() as db:
+        query = select(SupplierReplyOutbox).where(SupplierReplyOutbox.status == "pending").order_by(SupplierReplyOutbox.id)
+        if db.get_bind().dialect.name == "postgresql":
+            query = query.with_for_update(skip_locked=True)
+        item = db.scalar(query.limit(1))
+        if item is None:
+            return None
+        item.status = "processing"
+        item.attempt_count += 1
+        item.claimed_at = datetime.now().astimezone()
+        db.flush()
+        db.expunge(item)
+        return item
+
+
+def mark_supplier_reply_sent(item_id: int) -> None:
+    with SessionLocal.begin() as db:
+        item = db.scalar(
+            select(SupplierReplyOutbox).where(SupplierReplyOutbox.id == item_id).with_for_update()
+        )
+        if item is None or item.status != "processing":
+            return
+        now = datetime.now().astimezone()
+        item.status = "sent"
+        item.sent_at = now
+        item.last_error = None
+        db.add(EmailSent(
+            complaint_id=item.complaint_id, recipient=item.recipient,
+            subject=item.subject, body=item.body, attachments=[],
+            message_id=item.message_id,
+            smtp_result={"mode":"supplier_reply","status":"accepted","discount_percent":item.discount_percent},
+            sent_at=now,
+        ))
+        db.add(ComplaintEvent(
+            complaint_id=item.complaint_id,
+            event_type="supplier_offer_acceptance_sent",
+            actor="email-worker",
+            details={
+                "source_id":item.reply_to_source_id,
+                "discount_percent":item.discount_percent,
+                "reply_outbox_id":item.id,
+                "message_id":item.message_id,
+            },
+        ))
+
+
+def mark_supplier_reply_error(item_id: int, error: Exception, *, ambiguous: bool) -> None:
+    with SessionLocal.begin() as db:
+        item = db.scalar(
+            select(SupplierReplyOutbox).where(SupplierReplyOutbox.id == item_id).with_for_update()
+        )
+        if item is None or item.status != "processing":
+            return
+        item.status = "unknown" if ambiguous else "failed"
+        item.last_error = str(error)[:1000]
+        db.add(ComplaintEvent(
+            complaint_id=item.complaint_id,
+            event_type="supplier_offer_acceptance_unknown" if ambiguous else "supplier_offer_acceptance_failed",
+            actor="email-worker",
+            details={"source_id":item.reply_to_source_id,"reply_outbox_id":item.id,"error_type":type(error).__name__},
+        ))
+
 def stop_worker(*_: object) -> None:
     global RUNNING
     RUNNING = False
@@ -194,25 +261,38 @@ def main() -> None:
             time.sleep(min(settings.email_worker_interval_seconds, 30))
             continue
         item = claim_next()
+        supplier_reply = False
+        if item is None:
+            item = claim_next_supplier_reply()
+            supplier_reply = item is not None
         if item is None:
             time.sleep(settings.email_worker_interval_seconds)
             continue
         try:
             deliver(item)
         except AmbiguousSendError as error:
-            mark_error(item.id, error, ambiguous=True)
-            log("Niejednoznaczny wynik wysyłki SMTP", outbox_id=item.id)
+            if supplier_reply:
+                mark_supplier_reply_error(item.id, error, ambiguous=True)
+            else:
+                mark_error(item.id, error, ambiguous=True)
+            log("Niejednoznaczny wynik wysyłki SMTP", outbox_id=item.id, supplier_reply=supplier_reply)
         except Exception as error:
-            mark_error(item.id, error, ambiguous=False)
-            log("Wysyłka SMTP nie powiodła się", outbox_id=item.id, error_type=type(error).__name__)
+            if supplier_reply:
+                mark_supplier_reply_error(item.id, error, ambiguous=False)
+            else:
+                mark_error(item.id, error, ambiguous=False)
+            log("Wysyłka SMTP nie powiodła się", outbox_id=item.id, supplier_reply=supplier_reply, error_type=type(error).__name__)
         else:
-            mark_sent(item.id)
-            log("Serwer SMTP przyjął wiadomość", outbox_id=item.id)
+            if supplier_reply:
+                mark_supplier_reply_sent(item.id)
+            else:
+                mark_sent(item.id)
+            log("Serwer SMTP przyjął wiadomość", outbox_id=item.id, supplier_reply=supplier_reply)
             # A raw SMTP submission does not populate Outlook's Sent folder.
             # Archiving is independent of delivery and must never trigger SMTP retry.
             try:
                 from .services.sent_copy import archive_outbox
-                copy_result = archive_outbox(item.id)
+                copy_result = archive_outbox(item.id, supplier_reply=supplier_reply)
                 log("Zapisano kopię w folderze Wysłane", outbox_id=item.id, **copy_result)
             except Exception as error:
                 log("Nie zapisano kopii w Wysłanych; SMTP już przyjął wiadomość", outbox_id=item.id, error_type=type(error).__name__)

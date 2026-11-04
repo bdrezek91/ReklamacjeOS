@@ -253,6 +253,34 @@ class EmailOutbox(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+
+class SupplierReplyOutbox(Base):
+    """Dedicated follow-up queue: initial complaint email can already have been sent."""
+    __tablename__ = "supplier_reply_outbox"
+    __table_args__ = (
+        UniqueConstraint("complaint_id", "reply_to_source_id", name="uq_supplier_reply_outbox_reply"),
+        UniqueConstraint("message_id", name="uq_supplier_reply_outbox_message_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    complaint_id: Mapped[int] = mapped_column(ForeignKey("complaints.id", ondelete="RESTRICT"), nullable=False)
+    reply_to_source_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(320), nullable=False)
+    sender: Mapped[str] = mapped_column(String(320), nullable=False)
+    subject: Mapped[str] = mapped_column(String(998), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    in_reply_to: Mapped[str] = mapped_column(String(998), nullable=False)
+    references: Mapped[str] = mapped_column(Text, nullable=False)
+    message_id: Mapped[str] = mapped_column(String(998), nullable=False)
+    discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class EmailSent(Base):
     __tablename__ = "email_sent"
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .config import settings
 from .db import get_db
-from .models import Attachment, Complaint, ComplaintEvent, Supplier, WhatsAppMessage, WhatsAppOutbox
+from .models import Attachment, Complaint, ComplaintEvent, EmailOutbox, EmailSent, Supplier, SupplierReplyOutbox, WhatsAppMessage, WhatsAppOutbox
 from .services.correspondence import auto_prepare_supplier_workflow
 from .services.grouping import DraftOperationError, assign_message_to_draft, create_draft
 from .services.intake import extract_fields_from_text, merge_extracted_fields
@@ -77,6 +77,27 @@ async def ingest_manual_email(
 
     try:
         db.flush()
+        # A message sent by ReklamacjeOS and then archived in IMAP Sent belongs
+        # to its original case; never create a second complaint for the same email.
+        native = db.scalar(select(EmailOutbox).where(EmailOutbox.message_id == message_id))
+        if native is None:
+            native = db.scalar(select(SupplierReplyOutbox).where(SupplierReplyOutbox.message_id == message_id))
+        if native is not None:
+            complaint = db.get(Complaint, native.complaint_id)
+            if complaint and complaint.merged_into_id is None:
+                message.complaint_id = complaint.id
+                db.add(ComplaintEvent(
+                    complaint_id=complaint.id,
+                    event_type="native_sent_email_imported",
+                    actor="system:email-intake",
+                    details={"source_id": source_id, "message_id": message_id, "folder": folder},
+                ))
+                db.commit()
+                return {
+                    "id": message.id, "created": True, "complaint_id": complaint.id,
+                    "draft_number": complaint.draft_number, "matched": True,
+                    "match_rule": "native_smtp_message_id",
+                }
         complaint = create_draft(
             db,
             actor="system:email-intake",

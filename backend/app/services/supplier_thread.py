@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Complaint, ComplaintEvent, WhatsAppMessage
+from ..models import Complaint, ComplaintEvent, EmailOutbox, EmailSent, WhatsAppMessage
 from .complaints import BUSINESS_DECISIONS
 from .grouping import DraftOperationError
 
@@ -122,6 +122,19 @@ def find_complaint_for_email(
     ).all()
 
     if refs:
+        # First look at native SMTP records. The Sent-folder copy may arrive later.
+        for ref in refs:
+            native = db.scalar(select(EmailOutbox).where(EmailOutbox.message_id == ref))
+            if native:
+                complaint = db.get(Complaint, native.complaint_id)
+                if complaint and complaint.merged_into_id is None:
+                    return complaint, "native_smtp_message_id"
+            receipt = db.scalar(select(EmailSent).where(EmailSent.message_id == ref).order_by(EmailSent.id.desc()))
+            if receipt:
+                complaint = db.get(Complaint, receipt.complaint_id)
+                if complaint and complaint.merged_into_id is None:
+                    return complaint, "native_sent_receipt"
+
         for message in email_messages:
             payload = _email_payload(message)
             msgid = str(payload.get("message_id") or "").strip()
@@ -129,6 +142,15 @@ def find_complaint_for_email(
                 complaint = db.get(Complaint, message.complaint_id)
                 if complaint and complaint.merged_into_id is None:
                     return complaint, "header_reference"
+
+    # A precise official complaint number is more reliable than fuzzy subject matches.
+    official = re.search(r"\bR/\d{1,3}/\d{2}/20\d{2}\b", subject or "", re.I)
+    if official:
+        complaint = db.scalar(
+            select(Complaint).where(Complaint.official_number == official.group(0).upper())
+        )
+        if complaint and complaint.merged_into_id is None:
+            return complaint, "official_complaint_number"
 
     incoming_zs = normalize_zs(f"{subject}\n{body}")
     if incoming_zs:

@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from ..config import settings
 from ..db import SessionLocal
-from ..models import EmailOutbox, EmailSent
+from ..models import EmailOutbox, EmailSent, SupplierReplyOutbox
 from ..email_worker import build_message
 
 
@@ -36,9 +36,9 @@ def _sent_folder(conn):
     return fallback
 
 
-def archive_outbox(outbox_id):
+def archive_outbox(outbox_id, *, supplier_reply=False):
     with SessionLocal() as db:
-        item = db.get(EmailOutbox, outbox_id)
+        item = db.get(SupplierReplyOutbox if supplier_reply else EmailOutbox, outbox_id)
         if item is None or item.status != "sent" or not item.sent_at:
             raise RuntimeError("Outbox must have confirmed SMTP acceptance")
         record = db.scalar(select(EmailSent).where(EmailSent.message_id == item.message_id))

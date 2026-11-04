@@ -13,8 +13,12 @@
       <span class="badge success">{{ status_label }}</span>
       <span class="badge">{{ messages|length }} wiad.</span>
       <span class="badge">{{ attachment_count }} zdj.</span>
-      {% if complaint.resolution_strategy and business_decisions.get(complaint.resolution_strategy) %}
-        <span class="badge">{{ business_decisions.get(complaint.resolution_strategy).label }}</span>
+      {% if supplier_acceptance_outbox and supplier_acceptance_outbox.status == 'sent' %}
+        <span class="badge">Uzgodniony rabat {{ supplier_acceptance_outbox.discount_percent }}%</span>
+      {% elif supplier_acceptance_outbox and supplier_acceptance_outbox.status in ['pending', 'processing'] %}
+        <span class="badge">Potwierdzamy rabat {{ supplier_acceptance_outbox.discount_percent }}%</span>
+      {% elif complaint.resolution_strategy and business_decisions.get(complaint.resolution_strategy) %}
+        <span class="badge">Wstępna decyzja: {{ business_decisions.get(complaint.resolution_strategy).label }}</span>
       {% endif %}
     </div>
   </section>
@@ -68,6 +72,41 @@
       {% endif %}
     </section>
   </div>
+
+  {% if not complaint.merged_into and supplier_offer_percent and autopilot.latest_supplier and complaint.status.value == 'sent' %}
+    <section class="panel supplier-offer-panel" id="paneltech-offer">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Odpowiedź dostawcy</p>
+          <h2>Paneltech proponuje {{ supplier_offer_percent }}% rabatu</h2>
+        </div>
+        <span class="badge">Reklamacja {{ complaint.official_number }}</span>
+      </div>
+      <p>Paneltech prosi o potwierdzenie propozycji. Zaakceptowanie jej <strong>nie zamyka reklamacji</strong> — po wysyłce czekamy na korektę faktury.</p>
+      <div class="mail-excerpt supplier-excerpt">{{ autopilot.supplier_position }}</div>
+      {% if supplier_acceptance_outbox %}
+        {% if supplier_acceptance_outbox.status == 'sent' %}
+          <div class="notice success"><strong>Propozycja {{ supplier_acceptance_outbox.discount_percent }}% zaakceptowana i wysłana do Paneltech.</strong> Czekamy na korektę. Reklamacja pozostaje otwarta.</div>
+        {% elif supplier_acceptance_outbox.status in ['pending', 'processing'] %}
+          <div class="notice warning"><strong>Potwierdzenie oczekuje na wysłanie lub jest w trakcie wysyłki.</strong> Nie klikaj drugi raz.</div>
+        {% else %}
+          <div class="notice warning"><strong>Wynik wysyłki: {{ supplier_acceptance_outbox.status }}.</strong> Sprawdź firmową pocztę „Wysłane” przed jakąkolwiek kolejną próbą. Nie wysyłamy automatycznie duplikatów.</div>
+        {% endif %}
+      {% else %}
+        <form method="post" action="{{ root_path }}/drafts/{{ complaint.id }}/supplier-offer/accept"
+              onsubmit="return confirm('Potwierdzasz akceptację rabatu {{ supplier_offer_percent }}% i wysłanie tej wiadomości do Paneltech? Reklamacja pozostanie otwarta do korekty faktury.')">
+          <input type="hidden" name="action_token" value="{{ panel_action_token }}">
+          <input type="hidden" name="reply_to_source_id" value="{{ autopilot.latest_supplier.source_id }}">
+          <input type="hidden" name="discount_percent" value="{{ supplier_offer_percent }}">
+          <label>Treść odpowiedzi — możesz ją poprawić przed wysłaniem
+            <textarea name="body" rows="8" required>{{ supplier_acceptance_body }}</textarea>
+          </label>
+          <p class="muted">Odpowiedź zostanie wysłana w tym samym wątku e-mail. Stopka firmowa zostanie dodana automatycznie.</p>
+          <button class="button" type="submit">Akceptuję {{ supplier_offer_percent }}% i wyślij potwierdzenie</button>
+        </form>
+      {% endif %}
+    </section>
+  {% endif %}
 
   {% if not complaint.merged_into %}
   <section class="panel supplier-mail-shortcut" id="paneltech-mail">

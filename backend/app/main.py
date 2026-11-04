@@ -20,6 +20,7 @@ from .models import (
     ComplaintStatus,
     EmailDraft,
     EmailOutbox,
+    SupplierReplyOutbox,
     Supplier,
     WhatsAppMessage,
     WhatsAppOutbox,
@@ -49,6 +50,7 @@ from .services.correspondence import (
     update_email_draft,
 )
 from .services.grouping import DraftOperationError, merge_drafts, split_draft
+from .services.supplier_acceptance import default_acceptance_body, enqueue_supplier_acceptance, offered_discount, reply_status
 from .services.intake import (
     FIELD_LABELS,
     ensure_missing_data_question,
@@ -344,6 +346,8 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
     )
     if complaint is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+    if complaint.merged_into_id is not None:
+        return RedirectResponse(f"{settings.root_path}/drafts/{complaint.merged_into_id}", status_code=303)
 
     targets = db.scalars(
         select(Complaint)
@@ -383,6 +387,15 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
         latest_supplier_message["source_id"] if latest_supplier_message else None,
     )
     autopilot = derive_autopilot(complaint)
+    supplier_offer = offered_discount(latest_supplier_message["body"]) if latest_supplier_message else None
+    supplier_acceptance_outbox = (
+        reply_status(db, complaint, latest_supplier_message["source_id"])
+        if latest_supplier_message else None
+    )
+    supplier_acceptance_body = (
+        default_acceptance_body(complaint, latest_supplier_message, supplier_offer)
+        if supplier_offer and complaint.official_number and latest_supplier_message else ""
+    )
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
@@ -438,6 +451,9 @@ def draft_detail(complaint_id: int, request: Request, db: Session = Depends(get_
             "email_thread": email_thread,
             "latest_supplier_message": latest_supplier_message,
             "supplier_reply_draft": supplier_reply_draft,
+            "supplier_offer_percent": supplier_offer,
+            "supplier_acceptance_outbox": supplier_acceptance_outbox,
+            "supplier_acceptance_body": supplier_acceptance_body,
         },
     )
 
@@ -997,6 +1013,33 @@ def send_smtp_action(
     except DraftOperationError as error:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/drafts/{complaint_id}/supplier-offer/accept")
+def accept_supplier_offer_action(
+    complaint_id: int,
+    reply_to_source_id: str = Form(...),
+    discount_percent: int = Form(...),
+    body: str = Form(...),
+    action_token: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    verify_panel_action_token(action_token)
+    try:
+        enqueue_supplier_acceptance(
+            db,
+            complaint_id,
+            reply_to_source_id=reply_to_source_id,
+            discount_percent=discount_percent,
+            body=body,
+            actor="panel",
+        )
+        db.commit()
+    except (DraftOperationError, IntegrityError) as error:
+        db.rollback()
+        detail = str(error) if isinstance(error, DraftOperationError) else "Potwierdzenie już zostało zlecone"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from error
     return RedirectResponse(f"{settings.root_path}/drafts/{complaint_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

@@ -352,3 +352,10 @@ th { color:#c9a227; font-size:12px; text-transform:uppercase; letter-spacing:.05
 }
 .supplier-mail-shortcut > p { margin: 12px 0; }
 .supplier-mail-shortcut .button { margin-top: 4px; }
+
+
+/* The supplier's offer is an actionable step, separate from the original email. */
+.supplier-offer-panel { border-left:4px solid #d4aa19; margin:16px 0; }
+.supplier-offer-panel .mail-excerpt { margin:12px 0; max-height:270px; }
+.supplier-offer-panel label { display:block; font-weight:700; }
+.supplier-offer-panel textarea { display:block; width:100%; margin:10px 0 12px; background:#0e0e0e; color:#f4f4f4; border:1px solid #3b3b3b; border-radius:8px; padding:12px; line-height:1.5; resize:vertical; }

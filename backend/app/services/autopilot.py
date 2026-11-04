@@ -39,7 +39,37 @@ def derive_autopilot(complaint: Complaint) -> dict[str, Any]:
         latest_supplier["source_id"] if latest_supplier else None,
     )
 
-    if complaint.resolution_strategy == "second_grade_no_claim":
+    acceptance_events = sorted(
+        (
+            e for e in complaint.events
+            if latest_supplier
+            and e.event_type.startswith("supplier_offer_acceptance_")
+            and (e.details or {}).get("source_id") == latest_supplier["source_id"]
+        ),
+        key=lambda e: (e.created_at, e.id),
+        reverse=True,
+    )
+    latest_acceptance = acceptance_events[0] if acceptance_events else None
+
+    if latest_acceptance and latest_acceptance.event_type == "supplier_offer_acceptance_sent":
+        bucket = "waiting"
+        label = "Czekamy"
+        headline = "Zaakceptowano warunki Paneltech – czekamy na korektę"
+        next_action = "Potwierdzenie wysłane. Sprawdź otrzymanie korekty faktury przed zakończeniem reklamacji."
+        tone = "waiting"
+    elif latest_acceptance and latest_acceptance.event_type == "supplier_offer_acceptance_queued":
+        bucket = "waiting"
+        label = "Czekamy"
+        headline = "Wysyłamy potwierdzenie do Paneltech"
+        next_action = "Potwierdzenie czeka w kolejce. Nie wysyłaj ponownie."
+        tone = "waiting"
+    elif latest_acceptance and latest_acceptance.event_type.endswith(("_failed", "_unknown")):
+        bucket = "action"
+        label = "Do zrobienia"
+        headline = "Sprawdź wynik wysłania potwierdzenia"
+        next_action = "Nie ponawiaj bez weryfikacji folderu Wysłane."
+        tone = "action"
+    elif complaint.resolution_strategy == "second_grade_no_claim":
         bucket = "closed"
         label = "Zamknięte"
         headline = "II gatunek – brak możliwości reklamacji"
@@ -129,7 +159,7 @@ def derive_autopilot(complaint: Complaint) -> dict[str, Any]:
         "headline": headline,
         "next_action": next_action,
         "tone": tone,
-        "needs_reply": bool(last_email and last_email["direction"] == "incoming"),
+        "needs_reply": bool(last_email and last_email["direction"] == "incoming" and not latest_acceptance),
         "last_email": last_email,
         "last_move": last_move,
         "latest_supplier": latest_supplier,
